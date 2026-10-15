@@ -1,4 +1,5 @@
 import type { Evidence, Preferences } from "./types";
+import { findCompany } from "./companies";
 
 interface KnowledgeTopic {
   keywords: string[];
@@ -45,6 +46,78 @@ const TOPICS: KnowledgeTopic[] = [
       "1. **Definition**: An ordered collection supporting index-based access starting at 0 and slicing via `s[start:stop:step]`.",
       "2. **Key Varieties**: Mutable (`list`, `bytearray`) for dynamic data; immutable (`tuple`, `str`, `range`) for fixed integrity and hashable dictionary keys.",
       "3. **Standard Methods**: Leverage `.index()`, `.count()`, concatenation with `+`, and unpacking (`a, b = s`)."
+    ]
+  },
+  {
+    keywords: ["mutable vs immutable", "mutable and immutable", "mutability in python", "mutable types", "immutable types", "python mutability", "mutable", "immutable"],
+    title: "Mutable vs Immutable in Python",
+    simple: "In Python, mutable objects can be changed after they are created, like lists, dictionaries, and sets. Immutable objects cannot be changed once created—like numbers, strings, and tuples. If you modify an immutable object, Python actually creates a brand-new object in memory.",
+    everyday: "In Python, mutability defines whether an object's state can be modified after creation. Mutable types include `list`, `dict`, and `set`, allowing in-place additions and updates with the same memory ID. Immutable types include `int`, `float`, `str`, `tuple`, and `frozenset`. When you modify an immutable object, Python creates a new object in memory. A key interview gotcha is avoiding mutable default arguments like `def append_to(item, target=[])`, which reuses the same list across function calls.",
+    advanced: "In Python's object model, every object has an identity (`id()`), type, and value. For immutable types (`int`, `str`, `tuple`, `frozenset`), the value cannot be mutated post-instantiation; operations like string concatenation allocate new memory or utilize PyMalloc buffer pooling. Only immutable and hashable objects can serve as dictionary keys or set elements. Mutable default arguments in function definitions bind at compile time, leading to state persistence bugs, which are idiomatic to resolve using `target=None` and assigning inside the function.",
+    points: [
+      "**Mutable Types**: `list`, `dict`, `set`, and `bytearray` can be modified in-place without changing object identity (`id()`).",
+      "**Immutable Types**: `int`, `float`, `str`, `tuple`, and `frozenset` cannot change; modifications allocate new objects.",
+      "**Dictionary Keys**: Only immutable, hashable types can be used as dictionary keys and set members.",
+      "**Default Argument Gotcha**: Never use mutable defaults like `def fn(items=[])`; use `items=None` instead."
+    ],
+    steps: [
+      "1. **Core Distinction**: Mutable types permit in-place mutation; immutable types are fixed in memory once created.",
+      "2. **Hashability**: Immutability is required for hash table keys (dicts and sets) to ensure consistent hash codes.",
+      "3. **Function Arguments**: Pass by object reference—mutating a passed mutable object affects the caller, whereas reassigning does not."
+    ]
+  },
+  {
+    keywords: ["memory management", "garbage collection", "python memory", "reference counting", "cyclic garbage collection", "gc module", "how python manages memory"],
+    title: "Python Memory Management & Garbage Collection",
+    simple: "Python manages memory automatically using two systems. First, it counts how many references point to an object, and deletes it immediately when that count hits zero. Second, for circular references where two objects point to each other, Python has a periodic garbage collector that finds and clears them.",
+    everyday: "Python manages memory through a combination of reference counting and a generational cyclic garbage collector (`gc` module). Every object tracks its reference count; when references drop to zero, memory is freed immediately. To handle reference cycles (where object A points to B and B points to A), Python runs a cyclic detector categorized into 3 generations (0, 1, and 2), inspecting young objects frequently and surviving objects less often. Underneath, CPython uses PyMalloc to allocate small objects (< 512 bytes) inside pre-allocated pools to avoid system fragmentation.",
+    advanced: "CPython memory architecture operates at three tiers: the OS allocator, PyMalloc for small objects (<= 512 bytes) organized into 256KB arenas, 4KB pools, and size-specific blocks, and the standard Python object layer. Primary deallocation is deterministic reference counting (`ob_refcnt`). Non-zero circular references are collected by a generational cyclic garbage collector utilizing doubly-linked object headers (`PyGC_Head`). The GC tracks 3 generations with heuristic thresholds, executing Mark-and-Sweep while temporarily decrementing trial reference counts to detect unreachable cycles.",
+    points: [
+      "**Reference Counting**: Deterministic, immediate deallocation as soon as an object's reference count drops to 0.",
+      "**Generational Cyclic GC**: Handles circular references across generations 0, 1, and 2 using heuristic thresholds.",
+      "**PyMalloc Allocator**: Manages small objects (<= 512 bytes) in 256KB arenas and 4KB pools to minimize heap fragmentation.",
+      "**Optimization & Control**: The `gc` module provides `gc.collect()`, `gc.disable()`, and weak references (`weakref`) to prevent cycles."
+    ],
+    steps: [
+      "1. **Reference Counting**: Primary mechanism; increments on assignment, decrements on `del` or scope exit.",
+      "2. **Cycle Detection**: Secondary mechanism; generational collection resolves self-referential or cyclic graph structures.",
+      "3. **Best Practices**: Use `weakref` for caches and observer patterns to prevent memory leaks from unintentional references."
+    ]
+  },
+  {
+    keywords: ["decorator", "decorators", "python decorator", "function decorator", "@functools", "wraps"],
+    title: "Python Decorators",
+    simple: "A decorator in Python is a tool that lets you add extra behavior to an existing function without changing its code. It uses the '@' symbol above the function name, commonly used for logging, checking if a user is logged in, or timing how long code takes.",
+    everyday: "In Python, a decorator is a design pattern that wraps a function to extend or modify its behavior without permanently altering its source code. Decorators take a function as an argument, define an inner wrapper function that accepts `*args` and `**kwargs`, and return that wrapper. In production code, you should always use `@functools.wraps(func)` on the inner wrapper to preserve the original function's name, docstring, and metadata.",
+    advanced: "Decorators in Python are higher-order functions that leverage closures and the `@` syntactic sugar (PEP 318). A decorator receives callable `f` and returns callable `g`. To maintain introspective parity, `@functools.wraps` copies `__name__`, `__doc__`, `__module__`, and `__annotations__` via `functools.update_wrapper`. Decorators can also accept arguments by introducing an outer parameterized factory layer returning the actual decorator. Common enterprise applications include `@lru_cache`, authentication guards, distributed tracing, and retry logic.",
+    points: [
+      "**Core Concept**: A function that takes another function as input and returns an enhanced wrapper function.",
+      "**Syntactic Sugar**: `@my_decorator` placed above a function definition is equivalent to `func = my_decorator(func)`.",
+      "**Metadata Preservation**: Always apply `@functools.wraps(func)` on the wrapper to keep docstrings and function names intact.",
+      "**Production Uses**: Logging, execution timing, authentication/authorization, caching (`@lru_cache`), and rate limiting."
+    ],
+    steps: [
+      "1. **Define Wrapper**: Create an outer function taking `func`, an inner wrapper taking `*args, **kwargs`, and return `wrapper`.",
+      "2. **Preserve Metadata**: Annotate the inner wrapper with `@functools.wraps(func)`.",
+      "3. **Apply Cleanly**: Decorate target functions with `@decorator_name` or chain multiple decorators top-down."
+    ]
+  },
+  {
+    keywords: ["generator", "generators", "yield", "iterator", "iterators", "iter", "next", "python generator"],
+    title: "Generators and Iterators in Python",
+    simple: "In Python, an iterator is an object that lets you step through items one by one. A generator is the easiest way to make an iterator using the 'yield' keyword. Instead of returning everything at once and using lots of computer memory, a generator produces one item at a time only when you ask for it.",
+    everyday: "In Python, an iterator is any object that implements the iterator protocol: `__iter__()` returning self, and `__next__()` returning values until raising `StopIteration`. A generator is a special function that simplifies creating iterators using the `yield` statement. When called, a generator returns a generator object that evaluates lazily, meaning it produces items on the fly in O(1) memory instead of holding a huge list in RAM.",
+    advanced: "Generators are resumable coroutines implemented as stack-frame state machines in CPython. When execution encounters `yield`, the function's execution frame (`f_lasti`, local variables, instruction pointer) is suspended and yields control back to the caller. Calling `next()` resumes execution immediately after the yield point. Generators also support two-way communication via `.send(val)`, `.throw(exc)`, and `.close()`. They provide O(1) memory streaming for processing large datasets, CSVs, or unbounded sequences.",
+    points: [
+      "**Lazy Evaluation**: Values are calculated on demand, consuming O(1) constant memory regardless of stream size.",
+      "**Yield vs Return**: `yield` temporarily pauses the function and retains its internal state; `return` terminates execution.",
+      "**Iterator Protocol**: Implements `__iter__()` and `__next__()`, terminating with a `StopIteration` exception.",
+      "**Use Cases**: Reading large files line by line, generating infinite numeric streams, and building data processing pipelines."
+    ],
+    steps: [
+      "1. **Define with Yield**: Write a standard function containing one or more `yield` statements.",
+      "2. **Consume Lazily**: Iterate over the generator using a `for` loop, `next()`, or generator expressions `(x for x in data)`.",
+      "3. **Memory Advantage**: Use generators instead of list comprehensions whenever the entire collection does not need to sit in RAM."
     ]
   },
   {
@@ -544,6 +617,9 @@ export function generateHumanAnswer(
   const level = preferences.english_level || "everyday";
   const length = ["concise", "balanced", "detailed"].includes(preferences.answer_style || "") ? preferences.answer_style! : "concise";
   const tone = preferences.answer_tone || "professional";
+  const company = (preferences.company || "").trim();
+  const companyFocus = company ? findCompany(company)?.focus || "" : "";
+  const atCompany = company ? ` at ${company}` : "";
   // Code requests always win over delivery format: show exact code, not a paragraph.
   const codeIntent = isCodeRequest(question);
   const delivery = codeIntent ? "code" : rawDelivery;
@@ -557,8 +633,8 @@ export function generateHumanAnswer(
     const snippet = codeExample(question, language);
     const vague = question.trim().split(/\s+/).length <= 4;
     const note = length === "concise"
-      ? (vague ? "Here is a clean starting point. Tell me the exact task and I will tailor it." : "Here is how I would write it.")
-      : (vague ? "Here is a clean starting point I use. Tell me the exact inputs and edge cases and I will tailor it." : "Here is how I would write it in my own work.");
+      ? (vague ? "Here is a clean starting point. Tell me the exact task and I will tailor it." : `Here is how I would write it${atCompany}.`)
+      : (vague ? "Here is a clean starting point I use. Tell me the exact inputs and edge cases and I will tailor it." : `Here is how I would write it in my own work${atCompany}.`);
     const plainNote = stripPointers(note);
     const answer = `\`\`\`${language}\n${snippet}\n\`\`\`\n${plainNote}`;
     return { answer, keywords: qWords };
@@ -571,16 +647,19 @@ export function generateHumanAnswer(
       : tone === "friendly"
       ? "Great question! "
       : "";
+    const forCompany = company ? ` for ${company}` : "";
 
     if (delivery === "talking_points") {
       const bullets = length === "concise" ? topic.points.slice(0, 3) : topic.points;
-      const answer = `${opener}Here is the key breakdown of ${topic.title}:\n\n` + bullets.map(p => `• ${p}`).join("\n\n");
+      const tail = companyFocus ? `\n\nAt ${company}, I emphasize ${companyFocus}.` : "";
+      const answer = `${opener}Here is the key breakdown of ${topic.title}${forCompany}:\n\n` + bullets.map(p => `• ${p}`).join("\n\n") + tail;
       return { answer, keywords: qWords };
     }
 
     if (delivery === "structured") {
       const steps = length === "concise" ? topic.steps.slice(0, 2) : topic.steps;
-      const answer = `${opener}Here is how I explain ${topic.title} step-by-step:\n\n` + steps.join("\n\n");
+      const tail = companyFocus ? `\n\nAt ${company}, I emphasize ${companyFocus}.` : "";
+      const answer = `${opener}Here is how I explain ${topic.title} step-by-step${forCompany}:\n\n` + steps.join("\n\n") + tail;
       return { answer, keywords: qWords };
     }
 
@@ -594,13 +673,18 @@ export function generateHumanAnswer(
     } else if (length === "detailed") {
       coreText += " In my day-to-day work I use this to keep code clean and fast and to avoid runtime issues.";
     }
+    if (companyFocus && length !== "concise") {
+      coreText += ` At ${company}, they focus on ${companyFocus}, so I frame my answer that way.`;
+    }
     // Voice: speak as "I" so the candidate can say it naturally.
     let voiceText = coreText
       .replace(/^In Python,\s*a dictionary is\b/i, "I use a Python dictionary when I need")
       .replace(/^In Python,\s*/i, "In my work I ")
       .replace(/^A (REST API|database index|database)/i, "I treat a $1");
     if (!/\bI\b/.test(voiceText.slice(0, 60))) {
-      voiceText = (tone === "casual" ? "In my work, " : "In my work as a " + role + ", ") + voiceText.charAt(0).toLowerCase() + voiceText.slice(1);
+      voiceText = (tone === "casual" ? "In my work, " : `In my work as a ${role}${atCompany}, `) + voiceText.charAt(0).toLowerCase() + voiceText.slice(1);
+    } else if (company && !voiceText.slice(0, 120).includes(company)) {
+      voiceText = voiceText.replace(/^In my work as a ([^,]+), /, `In my work as a $1${atCompany}, `);
     }
 
     const answer = stripPointers(`${opener}${voiceText}`);
@@ -608,16 +692,28 @@ export function generateHumanAnswer(
   }
 
   // If the question is about personal experience or not in static topics
-  const hasEvidence = evidence.length > 0 && evidence[0]?.text;
-  const primaryEvidence = hasEvidence ? evidence[0].text : `architecting scalable applications as a ${role}`;
-  const sourceLabel = hasEvidence ? evidence[0].source_name : "my background";
+  // If the question is about personal experience or not in static topics
+  const hasEvidence = evidence.length > 0 && Boolean(evidence[0]?.text);
+  const isProjectQuery = /(recent|project|projects|work|built|worked on|experience|resume|background)/i.test(question);
+
+  // Clean evidence snippet for natural speaking: remove bullet symbols, document headers, raw markdown
+  const cleanEvidence = (hasEvidence ? evidence[0].text : `architecting scalable applications as a ${role}`)
+    .replace(/^[\s•\-\*\d+\.]+\s*/gm, "")
+    .replace(/^(Section\s+\d+|Candidate\s+Background|Technical\s+expertise|Document:)\s*:?/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const sentences = cleanEvidence.split(/(?<=[.?!])\s+/);
+  const coreEvidenceStatement = sentences.length > 1
+    ? `${sentences[0]} ${sentences[1]}`
+    : (sentences[0] || cleanEvidence.slice(0, 160));
 
   if (delivery === "talking_points") {
-    const answer = `Here are the key points regarding this from my experience as a ${role}:
+    const answer = `Here are the key points regarding this from my experience as a ${role}${atCompany}:
 
 • **Core Approach**: I focus on understanding constraints early, designing modular systems, and ensuring reliable execution.
-• **Practical Experience (${sourceLabel})**: ${primaryEvidence.slice(0, 160)}...
-• **Outcome**: Consistently delivered high uptime, maintainable code, and scalable team delivery.`;
+• **Practical Experience**: ${coreEvidenceStatement.slice(0, 180)}
+• **Outcome**: Consistently delivered high uptime, maintainable code, and scalable team delivery.${companyFocus ? `\n\nAt ${company}, I emphasize ${companyFocus}.` : ""}`;
     return { answer, keywords: qWords };
   }
 
@@ -625,21 +721,28 @@ export function generateHumanAnswer(
     const answer = `Here is my structured approach to this:
 
 1. **Analysis & Strategy**: Establish clear system requirements, identify edge cases, and choose the right tools for the job.
-2. **Implementation (${sourceLabel})**: Applied in practice through ${primaryEvidence.slice(0, 150)}...
+2. **Implementation**: Applied in practice through ${coreEvidenceStatement.slice(0, 180)}
 3. **Validation & Iteration**: Backed by automated testing, continuous integration, and performance benchmarking.`;
     return { answer, keywords: qWords };
   }
 
   // Natural answer
   const intro = tone === "casual"
-    ? `In my experience as a ${role}, `
+    ? `In my experience as a ${role}${atCompany}, `
     : tone === "friendly"
-    ? `From my background as a ${role}, `
-    : `As a ${role}, `;
+    ? `From my background as a ${role}${atCompany}, `
+    : `As a ${role}${atCompany}, `;
 
-  const answer = length === "concise"
-    ? `${intro}I focus on building reliable, clean solutions. In my recent work (${sourceLabel}), I applied this directly to ensure high performance and maintainable architecture.`
-    : `${intro}I approach this by breaking down the problem into clear, testable components. In my work on ${sourceLabel}, I focused on ${primaryEvidence.slice(0, 140)}... This ensured high availability, clean separation of concerns, and smooth delivery across the engineering team.`;
+  let answer = "";
+  if (isProjectQuery && hasEvidence) {
+    answer = length === "concise"
+      ? `${intro}in my recent project, I focused on ${coreEvidenceStatement.charAt(0).toLowerCase() + coreEvidenceStatement.slice(1)}. I took ownership of the core system design, optimized performance, and ensured clean delivery.`
+      : `${intro}in my recent project, I worked on ${coreEvidenceStatement.charAt(0).toLowerCase() + coreEvidenceStatement.slice(1)}. My focus was on architecting reliable components, ensuring high availability, and delivering scalable solutions across our engineering stack.`;
+  } else {
+    answer = length === "concise"
+      ? `${intro}I focus on building reliable, clean solutions. In my recent work, I focused on ${coreEvidenceStatement.charAt(0).toLowerCase() + coreEvidenceStatement.slice(1)}, ensuring high performance and maintainable architecture.`
+      : `${intro}I approach this by breaking down the problem into clear, testable components. In my work, I focused on ${coreEvidenceStatement.charAt(0).toLowerCase() + coreEvidenceStatement.slice(1)}, ensuring high availability, clean separation of concerns, and smooth delivery across the team.`;
+  }
 
   return { answer, keywords: qWords };
 }

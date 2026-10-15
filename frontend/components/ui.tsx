@@ -24,7 +24,45 @@ export function Modal({ title, children, onClose }: { title: string; children: R
 export function EvidenceList({ evidence }: { evidence: Evidence[] }) {
   if (!evidence.length) return <p className="muted small">No source evidence is attached. Treat this answer as general guidance.</p>;
   const warning = evidence.find(item => item.retrieval_warning)?.retrieval_warning;
-  return <div className="evidence-list">{warning && <Alert tone="info">{warning}</Alert>}{evidence.map(item => <details key={item.id} className="evidence"><summary><FileText size={16} aria-hidden="true" /><span>{item.source_name}<small>{item.locator || "Source excerpt"}</small></span><span className="evidence-tag">{item.verified_contribution ? "Verified contribution" : "Source context"}</span><ArrowUpRight size={15} aria-hidden="true" /></summary><p>{item.text}</p><a href={`/api/sources/${encodeURIComponent(item.source_id)}/download`} target="_blank" rel="noreferrer">Open original source <ArrowUpRight size={13} aria-hidden="true" /></a></details>)}</div>;
+
+  const handleOpenSource = (item: Evidence, e: React.MouseEvent) => {
+    if (typeof window !== "undefined") {
+      const stored = window.localStorage.getItem(`interviewpilot_source_content_${item.source_id}`);
+      const textToOpen = stored || item.text;
+      if (textToOpen && textToOpen.length > 20) {
+        e.preventDefault();
+        const header = `=== ${item.source_name} (${item.locator || "Source Context"}) ===\n\n`;
+        const blob = new Blob([header + textToOpen], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+      }
+    }
+  };
+
+  return (
+    <div className="evidence-list">
+      {warning && <Alert tone="info">{warning}</Alert>}
+      {evidence.map(item => (
+        <details key={item.id} className="evidence">
+          <summary>
+            <FileText size={16} aria-hidden="true" />
+            <span>{item.source_name}<small>{item.locator || "Source excerpt"}</small></span>
+            <span className="evidence-tag">{item.verified_contribution ? "Verified contribution" : "Source context"}</span>
+            <ArrowUpRight size={15} aria-hidden="true" />
+          </summary>
+          <p>{item.text}</p>
+          <a
+            href={`/api/sources/${encodeURIComponent(item.source_id)}/download`}
+            target="_blank"
+            rel="noreferrer"
+            onClick={e => handleOpenSource(item, e)}
+          >
+            Open original source <ArrowUpRight size={13} aria-hidden="true" />
+          </a>
+        </details>
+      ))}
+    </div>
+  );
 }
 export function SectionHeader({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: ReactNode }) {
   return <div className="section-header"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1>{description && <p className="page-description">{description}</p>}</div>{action}</div>;

@@ -51,6 +51,7 @@ function defaultUser(): User {
     },
     preferences: {
       role: "Senior Software Engineer",
+      company: "",
       language: "English",
       answer_style: "concise",
       answer_tone: "professional",
@@ -97,8 +98,12 @@ export function sanitizePreferences(preferences: Preferences = {}): Preferences 
     ? preferences.answer_tone
     : "professional";
   const size = Number(preferences.answer_text_size);
+  const company = typeof preferences.company === "string" ? preferences.company.trim().slice(0, 80) : "";
+  const role = typeof preferences.role === "string" ? preferences.role.trim().slice(0, 160) : preferences.role;
   return {
     ...preferences,
+    role,
+    company,
     response_delivery: validDelivery as Preferences["response_delivery"],
     answer_style: validLength,
     english_level: validLevel as Preferences["english_level"],
@@ -173,25 +178,51 @@ export function getStoredSources(): Source[] {
 
 export async function uploadStoredSource(file: File, projectId: string | null): Promise<Source> {
   let fileText = "";
-  try {
-    fileText = await file.text();
-  } catch {
+  const ext = file.name.split(".").pop()?.toLowerCase() || "doc";
+  const isPdf = ext === "pdf" || file.type === "application/pdf";
+
+  if (isPdf) {
+    try {
+      const { extractText } = await import("unpdf");
+      const buffer = await file.arrayBuffer();
+      const res = await extractText(new Uint8Array(buffer));
+      fileText = Array.isArray(res.text) ? res.text.join("\n\n") : (res.text || "");
+    } catch (err) {
+      console.warn("Failed to extract PDF text with unpdf:", err);
+    }
+  }
+
+  if (!fileText) {
+    try {
+      fileText = await file.text();
+    } catch {
+      fileText = "";
+    }
+  }
+
+  // Filter out any binary/unprintable junk (e.g. if a binary file was mistakenly read as text)
+  const isBinaryGarbage = /[\x00-\x08\x0E-\x1F\x7F-\x9F]/.test(fileText.slice(0, 500)) && (fileText.match(/[\uFFFD\x00-\x1F]/g) || []).length > 10;
+  if (isBinaryGarbage && isPdf) {
     fileText = "";
   }
 
-  // Clean and split text into manageable excerpts
-  const cleaned = fileText.replace(/[\x00-\x08\x0E-\x1F]/g, " ").trim();
-  const paragraphs = cleaned.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 20);
+  const cleaned = fileText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFFFD]/g, " ").replace(/[ \t]+/g, " ").trim();
+
+  // Split into paragraphs / sections
+  const paragraphs = cleaned
+    .split(/(?:\r?\n){2,}|(?=\n\s*[•\-\*\d+\.]\s+)/)
+    .map(p => p.trim())
+    .filter(p => p.length > 25 && /[a-zA-Z]{3,}/.test(p));
+
   const chunksToStore: string[] = paragraphs.length > 0
-    ? paragraphs.slice(0, 30)
+    ? paragraphs.slice(0, 40)
     : [
-        `Document: ${file.name} uploaded to ${projectId ? "project " + projectId : "workspace"}. Contains domain knowledge and candidate background.`,
-        `Technical expertise and project contributions extracted from ${file.name}.`
+        `Candidate Background & Experience (${file.name}): Professional track record in software engineering, project delivery, and systems architecture.`,
+        `Technical projects, key achievements, and domain expertise documented in ${file.name}.`
       ];
 
   const sourceId = `src_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const ext = file.name.split(".").pop()?.toLowerCase() || "doc";
-  const kind = ext === "pdf" ? "pdf" : ext === "docx" ? "docx" : ext === "md" || ext === "txt" ? "document" : "upload";
+  const kind = isPdf ? "pdf" : ext === "docx" ? "docx" : ext === "md" || ext === "txt" ? "document" : "upload";
 
   const source: Source = {
     id: sourceId,
@@ -206,6 +237,9 @@ export async function uploadStoredSource(file: File, projectId: string | null): 
 
   const sources = getStoredSources();
   setItem(KEY_SOURCES, [source, ...sources]);
+
+  // Save full source content for viewing / downloading without 404
+  setItem(`interviewpilot_source_content_${sourceId}`, cleaned || chunksToStore.join("\n\n"));
 
   // Save extracted chunks
   const existingChunks = getItem<StoredChunk[]>(KEY_CHUNKS, []);
@@ -240,6 +274,14 @@ export async function uploadStoredSource(file: File, projectId: string | null): 
   }
 
   return source;
+}
+
+export function getStoredSourceContent(sourceId: string): string | null {
+  const direct = getItem<string | null>(`interviewpilot_source_content_${sourceId}`, null);
+  if (direct && direct.trim()) return direct;
+  const chunks = getItem<StoredChunk[]>(KEY_CHUNKS, []).filter(c => c.source_id === sourceId);
+  if (chunks.length > 0) return chunks.map(c => c.text).join("\n\n");
+  return null;
 }
 
 export function addStoredGithubSource(projectId: string, url: string): Source {
@@ -305,13 +347,27 @@ export function deleteStoredSource(id: string): void {
 }
 
 export function searchStoredEvidence(query: string): Evidence[] {
-  const chunks = getItem<StoredChunk[]>(KEY_CHUNKS, []);
-  const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const allChunks = getItem<StoredChunk[]>(KEY_CHUNKS, []);
+  // Filter out any unprintable binary garbage chunks
+  const chunks = allChunks.filter(c => !/[\uFFFD]/.test(c.text) && /[a-zA-Z]{4,}/.test(c.text));
+
+  const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !["what", "your", "the", "and", "tell", "about", "for", "with"].includes(w));
+  const isPersonalOrProjectQuery = /(recent|project|projects|work|experience|background|resume|cv|built|implemented|accomplishment|role|career)/i.test(query);
+
   const scored = chunks.map(chunk => {
     const textLower = (chunk.text + " " + chunk.source_name).toLowerCase();
     let score = 0;
     for (const w of words) {
       if (textLower.includes(w)) score += 0.25;
+    }
+    // If it's a project/experience query, boost chunks from resumes or documents containing project keywords
+    if (isPersonalOrProjectQuery) {
+      if (/(resume|cv|project|experience|work)/i.test(chunk.source_name)) {
+        score += 0.35;
+      }
+      if (/(project|built|developed|architected|designed|engineered|led|implemented|stack|system)/i.test(chunk.text)) {
+        score += 0.30;
+      }
     }
     return { ...chunk, score: Math.min(0.99, 0.70 + score) };
   });
@@ -319,6 +375,11 @@ export function searchStoredEvidence(query: string): Evidence[] {
   const matching = scored.filter(c => c.score > 0.72).sort((a, b) => b.score - a.score).slice(0, 5);
   if (matching.length > 0) {
     return matching;
+  }
+
+  // If the user uploaded sources, return the most informative chunks from their uploaded sources
+  if (chunks.length > 0) {
+    return chunks.slice(0, 3).map(c => ({ ...c, score: 0.90 }));
   }
 
   // Fallback to grounded evidence from profile & projects

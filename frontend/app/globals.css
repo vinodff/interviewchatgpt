@@ -150,3 +150,13 @@ dialog.modal { max-width:620px; width:calc(100% - 32px); max-height:calc(100vh -
 .answer-size-control input { grid-column:1/-1; width:100%; height:44px; accent-color:var(--teal); }
 .preference-display-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 @media(max-width:760px) { .preference-display-row { grid-template-columns:minmax(0,1fr); } }
+/* Searchable company + role targeting. */
+.combo-field { position:relative; min-width:0; }
+.combo-field>label { display:flex; flex-direction:column; gap:7px; font-size:12px; font-weight:600; }
+.combo-field input { width:100%; min-width:0; border:1px solid #d8dfd4; border-radius:6px; background:#fff; min-height:43px; padding:10px 12px; color:var(--ink); font-weight:400; font-size:13px; }
+.combo-list { position:absolute; z-index:40; top:calc(100% + 4px); left:0; right:0; margin:0; padding:6px; list-style:none; background:#fff; border:1px solid #d8dfd4; border-radius:8px; box-shadow:0 12px 32px #183d3022; max-height:240px; overflow:auto; }
+.combo-option { display:flex; flex-direction:column; align-items:flex-start; gap:2px; width:100%; text-align:left; border:0; background:transparent; border-radius:6px; padding:10px 12px; min-height:44px; }
+.combo-option>span { font-size:13px; font-weight:600; color:var(--ink); }
+.combo-option>small { font-size:11px; color:var(--muted); line-height:1.5; }
+.combo-option.highlight,.combo-option:hover { background:#eef3e9; }
+@media(max-width:760px) { .combo-field input { font-size:16px; min-height:46px; } }

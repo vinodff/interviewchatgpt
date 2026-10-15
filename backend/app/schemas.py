@@ -16,6 +16,7 @@ class Login(BaseModel):
 
 class Preferences(BaseModel):
     role: str = Field(default="", max_length=160)
+    company: str = Field(default="", max_length=80)
     language: str = Field(default="English", max_length=80)
     answer_style: Literal["concise", "balanced", "detailed"] = "concise"
     answer_tone: Literal["professional", "friendly", "casual"] = "professional"

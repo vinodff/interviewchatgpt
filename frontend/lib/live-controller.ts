@@ -112,9 +112,9 @@ export function isLikelyQuestion(raw: string, clean: string): boolean {
   const isExplanation = /^(i\s|i'm|in my|in python\s+[a-z\s]+(is|are)\b|for example|basically|first|next|then|here|my\s|as a|so if|when we|it is|it has|this is|they are|we can|you can|user_scores|items\s*=)\b/i.test(c);
   if (isExplanation) return false;
 
-  // 8. Core technical interview concepts & topics (e.g. "sequential data type in Python", "sequence types in python", "linked list in Python")
+  // 8. Core technical interview concepts & topics (e.g. "sequential data type in Python", "mutable vs immutable", "garbage collection")
   // In an interview, naming a technical topic or concept is a prompt for the candidate to explain it.
-  const technicalTopics = /(sequential\s+data\s+type|sequence\s+type|sequence\s+types|data\s+type|linked\s+list|hash\s+map|dictionary|list\s+vs\s+tuple|palindrome|two\s+sum|binary\s+search|sorting\s+algorithm|recursion|gil\b|global\s+interpreter\s+lock|multithreading|concurrency|asyncio|generator|iterator|decorator|rest\s+api|fastapi|django|docker|kubernetes|sql\b|database\s+index|memory\s+management)/i;
+  const technicalTopics = /(sequential\s+data\s+type|sequence\s+type|sequence\s+types|data\s+type|mutable|immutable|mutability|garbage\s+collection|memory\s+management|linked\s+list|hash\s+map|dictionary|list\s+vs\s+tuple|palindrome|two\s+sum|binary\s+search|sorting\s+algorithm|recursion|gil\b|global\s+interpreter\s+lock|multithreading|concurrency|asyncio|generator|iterator|decorator|rest\s+api|fastapi|django|docker|kubernetes|sql\b|database\s+index)/i;
   if (technicalTopics.test(c)) {
     return true;
   }
@@ -159,8 +159,12 @@ export class LiveController {
   private keepAliveContext: AudioContext | null = null;
   /** Session start time for millisecond-level elapsed timestamp tracking */
   private startedAt = 0;
+  /** Text already finalized by previous recognition instances in the active turn */
+  private turnCommittedText = "";
+  /** Last processed question to prevent identical duplicate processing within 4s */
+  private lastProcessedQuestion = "";
   /** Tracks the last finalized turn for smart cross-pause utterance stitching */
-  private lastFinalizedTurn: { text: string; at: number; id: string } | null = null;
+  private lastFinalizedTurn: { text: string; at: number; id: string; role: "user" | "interviewer" } | null = null;
 
   constructor(private notify: (event: LiveMessage | LocalEvent) => void, private onSession: (session: Session) => void) {}
 
@@ -180,6 +184,9 @@ export class LiveController {
     if (this.isSelfEcho(text)) return "user";
     if (/^(my answer is|in my opinion|in my experience|in my work|as i mentioned|i typically|i would say|let me explain|so basically i|i use|i am|i'm|from my background|in my previous project|here is how i)\b/i.test(clean)) {
       return "user";
+    }
+    if (isLikelyQuestion(text, cleanQuestion(text))) {
+      return "interviewer";
     }
     return "interviewer";
   }
@@ -366,52 +373,54 @@ export class LiveController {
           recognition.onresult = (event: any) => {
             if (this.stopped) return;
 
-            let currentInterim = "";
-            let currentFinal = "";
+            let sessionFinal = "";
+            let sessionInterim = "";
 
-            for (let i = event.resultIndex; i < event.results.length; i++) {
+            for (let i = 0; i < event.results.length; i++) {
               const res = event.results[i];
               const phrase = res[0]?.transcript?.trim() || "";
               if (!phrase) continue;
               if (res.isFinal) {
-                currentFinal = currentFinal ? `${currentFinal} ${phrase}` : phrase;
+                sessionFinal = sessionFinal ? `${sessionFinal} ${phrase}` : phrase;
               } else {
-                currentInterim = currentInterim ? `${currentInterim} ${phrase}` : phrase;
+                sessionInterim = sessionInterim ? `${sessionInterim} ${phrase}` : phrase;
               }
             }
 
-            const incomingText = (currentFinal || currentInterim).trim();
+            const incomingText = (sessionFinal || sessionInterim).trim();
             if (!incomingText) return;
 
             // Ignore conversational filler acknowledgments when idle
-            if (this.isFiller(incomingText) && !this.activeUtterance) {
+            if (this.isFiller(incomingText) && !this.activeUtterance && !this.turnCommittedText) {
               return;
             }
 
             const now = Date.now();
             if (!this.activeTranscriptId) {
               // Smart cross-pause stitching:
-              // Check if incoming text is a continuation or repetition of the previously finalized turn
+              // Only stitch if prior turn was from the INTERVIEWER (never stitch into candidate speech!)
               const canStitch = this.lastFinalizedTurn
+                && this.lastFinalizedTurn.role === "interviewer"
                 && (now - this.lastFinalizedTurn.at < 6000)
                 && (
                   // Incomplete prompt ending: e.g. "tell me about", "what about", "how about", "explain", "is"
                   /(tell me about|what about|how about|explain|describe|what is|what are|the|in|about|of|for|and|with)$/i.test(this.lastFinalizedTurn.text.trim())
-                  // Or repetition / expansion: e.g. "sequential data type in Python"
-                  || incomingText.toLowerCase().includes(this.lastFinalizedTurn.text.toLowerCase())
-                  || this.lastFinalizedTurn.text.toLowerCase().includes(incomingText.toLowerCase())
+                  // Or direct continuation/prefix
+                  || incomingText.toLowerCase().startsWith(this.lastFinalizedTurn.text.toLowerCase())
                 );
 
               if (canStitch && this.lastFinalizedTurn) {
                 this.activeTranscriptId = this.lastFinalizedTurn.id;
-                this.activeUtterance = mergeUtterances(this.lastFinalizedTurn.text, incomingText);
+                this.turnCommittedText = this.lastFinalizedTurn.text;
               } else {
                 this.activeTranscriptId = `tr_${now}`;
-                this.activeUtterance = incomingText;
+                this.turnCommittedText = "";
               }
-            } else {
-              this.activeUtterance = mergeUtterances(this.activeUtterance, incomingText);
             }
+
+            // Clean replacement of current session interim text onto committed text - NO string-merging heuristics!
+            const finalizedSoFar = [this.turnCommittedText, sessionFinal].filter(Boolean).join(" ").trim();
+            this.activeUtterance = [finalizedSoFar, sessionInterim].filter(Boolean).join(" ").trim();
 
             const role = this.determineRole(this.activeUtterance);
             const timestamp = this.getElapsedTimestamp();
@@ -459,6 +468,10 @@ export class LiveController {
 
           recognition.onend = () => {
             this.isRecognizing = false;
+            // If recognition ended mid-utterance, commit current utterance so next instance continues seamlessly
+            if (this.activeTranscriptId && this.activeUtterance) {
+              this.turnCommittedText = this.activeUtterance;
+            }
             // On Android Chrome, recognition automatically ends after speech; immediately re-arm without delay
             if (!this.stopped && this.session && this.session.status !== "ended") {
               try {
@@ -494,7 +507,8 @@ export class LiveController {
 
   /**
    * Check if incoming speech is the user reading/repeating the last generated answer (self-echo).
-   * Checks both 3-word phrase overlap and significant keyword overlap.
+   * Strictly requires consecutive n-gram matches (5+ words) from the answer.
+   * Legitimate questions containing interview topics are NEVER self-echo.
    */
   private isSelfEcho(text: string): boolean {
     if (!this.lastAnswerText) return false;
@@ -502,32 +516,28 @@ export class LiveController {
     // Check within 60 seconds of the answer appearing
     if (elapsed > 60000) return false;
 
+    // If the utterance is classified as a question or begins with question interrogatives, it's NOT self-echo
+    if (isLikelyQuestion(text, cleanQuestion(text))) return false;
+    if (/^(what|how|why|when|where|which|who|can you|could you|tell me|explain|describe|difference between)\b/i.test(text.trim())) {
+      return false;
+    }
+
     const cleanAnswer = this.lastAnswerText.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
     const cleanSpeech = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
     if (!cleanAnswer || !cleanSpeech) return false;
 
-    // 1. 3-word n-gram check: if any 3 consecutive words in spoken speech appear in the answer, it's 100% self-echo
+    // 5-word n-gram check: if any 5 consecutive words in spoken speech appear in the answer, it's self-echo
     const speechTokens = cleanSpeech.split(" ").filter(w => w.length > 0);
-    if (speechTokens.length >= 3) {
-      for (let i = 0; i <= speechTokens.length - 3; i++) {
-        const tri = `${speechTokens[i]} ${speechTokens[i + 1]} ${speechTokens[i + 2]}`;
-        if (cleanAnswer.includes(tri)) {
+    if (speechTokens.length >= 5) {
+      for (let i = 0; i <= speechTokens.length - 5; i++) {
+        const penta = `${speechTokens[i]} ${speechTokens[i + 1]} ${speechTokens[i + 2]} ${speechTokens[i + 3]} ${speechTokens[i + 4]}`;
+        if (cleanAnswer.includes(penta)) {
           return true;
         }
       }
     }
 
-    // 2. Significant words overlap check: if >= 25% of spoken words are present in the answer
-    const answerWords = new Set(cleanAnswer.split(" ").filter(w => w.length > 3));
-    const speechWords = speechTokens.filter(w => w.length > 3);
-    if (speechWords.length === 0) return false;
-
-    let matchCount = 0;
-    for (const w of speechWords) {
-      if (answerWords.has(w)) matchCount++;
-    }
-
-    return matchCount / speechWords.length >= 0.25;
+    return false;
   }
 
   private async finalizeActiveUtterance() {
@@ -550,12 +560,13 @@ export class LiveController {
       });
     }
 
-    // Save for smart cross-pause utterance stitching
-    this.lastFinalizedTurn = { text: raw, at: Date.now(), id: transcriptId || `tr_${Date.now()}` };
+    // Save for smart cross-pause utterance stitching (including role)
+    this.lastFinalizedTurn = { text: raw, at: Date.now(), id: transcriptId || `tr_${Date.now()}`, role };
 
     // Reset utterance tracking so next question gets its own turn
     this.activeTranscriptId = null;
     this.activeUtterance = "";
+    this.turnCommittedText = "";
 
     // Candidate speech should not trigger new answers
     if (role === "user") return;
@@ -573,10 +584,8 @@ export class LiveController {
     // 2. If an answer is currently being streamed/generated, ignore new speech
     if (this.isGeneratingAnswer) return;
 
-    // 3. Cooldown protection: within 12s of an answer, only allow unmistakable new questions
-    const timeSinceLastAnswer = Date.now() - this.lastAnswerAt;
-    const isUnmistakableQuestion = /^(can you|could you|what is|how do|how can|why is|explain|write|implement)\b/i.test(clean) || raw.endsWith("?");
-    if (this.lastAnswerAt > 0 && timeSinceLastAnswer < 12000 && !isUnmistakableQuestion) {
+    // 3. Deduplication: if the exact same question is repeated within 4 seconds, do not regenerate
+    if (this.lastProcessedQuestion && this.lastProcessedQuestion.toLowerCase() === clean.toLowerCase() && (Date.now() - this.lastAnswerAt) < 4000) {
       return;
     }
 
@@ -589,6 +598,8 @@ export class LiveController {
     if (!isLikelyQuestion(raw, clean)) {
       return;
     }
+
+    this.lastProcessedQuestion = clean;
 
     await this.respondToQuestion(clean, raw);
   }

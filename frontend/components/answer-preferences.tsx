@@ -2,11 +2,88 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Check, ChevronDown, SlidersHorizontal } from "lucide-react";
 import { messageOf } from "@/lib/api";
 import { useOwnedApi } from "@/lib/use-owned-api";
+import { ROLES, searchCompanies } from "@/lib/companies";
 import type { Preferences, User } from "@/lib/types";
 import { Alert, Button } from "./ui";
 
 export function completePreferences(preferences: Preferences = {}): Preferences {
-  return { role: "", language: "English", answer_style: "concise", job_description: "", answer_tone: "professional", grounding: "balanced", english_level: "everyday", reading_mode: "auto", reading_wpm: 130, response_delivery: "natural", personalization: "grounded", answer_text_size: 17, answer_font: "system", answer_theme: "default", ...preferences };
+  return { role: "", company: "", language: "English", answer_style: "concise", job_description: "", answer_tone: "professional", grounding: "balanced", english_level: "everyday", reading_mode: "auto", reading_wpm: 130, response_delivery: "natural", personalization: "grounded", answer_text_size: 17, answer_font: "system", answer_theme: "default", ...preferences };
+}
+
+type ComboItem = { key: string; label: string; sub?: string };
+
+function ComboField({ label, name, value, defaultValue, placeholder, getItems, onPick }: {
+  label: string; name: string; value?: string; defaultValue?: string; placeholder: string;
+  getItems: (query: string) => ComboItem[]; onPick?: (value: string) => void;
+}) {
+  const controlled = value !== undefined;
+  const [query, setQuery] = useState(value ?? defaultValue ?? "");
+  // Sync when the saved value round-trips back (e.g. after auto-save).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { if (controlled) setQuery(value ?? ""); }, [controlled, value]);
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function onDoc(event: MouseEvent) { if (!box.current?.contains(event.target as Node)) setOpen(false); }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+  const items = getItems(query);
+  function commit(next: string) {
+    const trimmed = next.trim();
+    if (!controlled) setQuery(next);
+    else setQuery(next);
+    onPick?.(trimmed);
+    setOpen(false);
+  }
+  const listId = `${name}-suggestions`;
+  return <div className="combo-field" ref={box}>
+    <label>{label}<input
+      name={name} role="combobox" aria-expanded={open} aria-controls={listId} aria-autocomplete="list" autoComplete="off"
+      value={query} placeholder={placeholder} maxLength={80}
+      onChange={event => { setQuery(event.target.value); setOpen(true); setHighlight(0); }}
+      onFocus={() => setOpen(true)}
+      onBlur={() => { if (controlled) onPick?.(query.trim()); }}
+      onKeyDown={event => {
+        if (event.key === "ArrowDown" && items.length) { event.preventDefault(); setHighlight(h => (h + 1) % items.length); }
+        else if (event.key === "ArrowUp" && items.length) { event.preventDefault(); setHighlight(h => (h - 1 + items.length) % items.length); }
+        else if (event.key === "Enter" && open && items.length) { event.preventDefault(); commit(items[highlight]?.label ?? query); }
+        else if (event.key === "Escape") setOpen(false);
+      }}
+    /></label>
+    {open && items.length > 0 && <ul className="combo-list" id={listId} role="listbox" aria-label={`${label} suggestions`}>
+      {items.map((item, index) => <li key={item.key}>
+        <button type="button" role="option" aria-selected={index === highlight}
+          className={`combo-option ${index === highlight ? "highlight" : ""}`}
+          onMouseDown={event => { event.preventDefault(); commit(item.label); }}>
+          <span>{item.label}</span>{item.sub && <small>{item.sub}</small>}
+        </button>
+      </li>)}
+    </ul>}
+  </div>;
+}
+
+export function CompanyField({ preferences, controlled = false, onChange }: { preferences: Preferences; controlled?: boolean; onChange?: (preferences: Preferences) => void }) {
+  return <ComboField label="Target company" name="company"
+    value={controlled ? preferences.company || "" : undefined} defaultValue={controlled ? undefined : preferences.company || ""}
+    placeholder="Search: Amazon, Meta, TCS, Lumen…"
+    getItems={query => searchCompanies(query).map(c => ({ key: c.name, label: c.name, sub: `${c.category} · ${c.focus.slice(0, 52)}…` }))}
+    onPick={company => onChange?.({ ...preferences, company })} />;
+}
+
+export function RoleField({ preferences, controlled = false, onChange }: { preferences: Preferences; controlled?: boolean; onChange?: (preferences: Preferences) => void }) {
+  return <ComboField label="Job role" name="role"
+    value={controlled ? preferences.role || "" : undefined} defaultValue={controlled ? undefined : preferences.role || ""}
+    placeholder="e.g. SDE II, Frontend Developer…"
+    getItems={query => {
+      const q = query.trim().toLowerCase();
+      const matches = (q ? ROLES.filter(r => r.toLowerCase().includes(q)) : ROLES).slice(0, 8);
+      const items = matches.map(r => ({ key: r, label: r }));
+      if (q && !matches.some(r => r.toLowerCase() === q)) items.unshift({ key: `custom:${q}`, label: query.trim() });
+      return items;
+    }}
+    onPick={role => onChange?.({ ...preferences, role })} />;
 }
 
 export function AnswerPreferenceFields({ preferences, controlled = false, onChange }: { preferences: Preferences; controlled?: boolean; onChange?: (preferences: Preferences) => void }) {
@@ -20,6 +97,8 @@ export function AnswerPreferenceFields({ preferences, controlled = false, onChan
   }
   return <div className="answer-preference-fields">
     <div className="preference-primary">
+      <CompanyField preferences={preferences} controlled={controlled} onChange={onChange} />
+      <RoleField preferences={preferences} controlled={controlled} onChange={onChange} />
       <label>Answer format<select name="response_delivery" {...value("response_delivery", "natural")} onChange={event => onChange?.({ ...preferences, response_delivery: event.target.value as Preferences["response_delivery"] })}><option value="natural">Natural answer</option><option value="talking_points">Talking points</option><option value="structured">Step by step</option></select></label>
       <label>English level<select name="english_level" {...value("english_level", "everyday")} onChange={event => onChange?.({ ...preferences, english_level: event.target.value as Preferences["english_level"] })}><option value="simple">Simple English</option><option value="everyday">Everyday English</option><option value="advanced">Advanced English</option></select></label>
       <label>Answer length<select name="answer_style" {...value("answer_style", "concise")} onChange={event => onChange?.({ ...preferences, answer_style: event.target.value })}><option value="concise">Short</option><option value="balanced">Balanced</option><option value="detailed">Detailed</option></select></label>

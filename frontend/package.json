@@ -13,12 +13,13 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@tailwindcss/postcss": "^4.2.0",
+    "lucide-react": "^0.577.0",
     "next": "16.4.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "lucide-react": "^0.577.0",
     "tailwindcss": "^4.2.0",
-    "@tailwindcss/postcss": "^4.2.0"
+    "unpdf": "^1.8.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

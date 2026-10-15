@@ -231,6 +231,50 @@ describe("smart utterance deduplication and question cleaning", () => {
     const directSeqTopic = findMatchingTopic("sequential data type in Python");
     expect(directSeqTopic).not.toBeNull();
     expect(directSeqTopic?.title).toBe("Sequence Types in Python");
+
+    const mutTopic = findMatchingTopic("what is the difference between mutable and immutable in python");
+    expect(mutTopic).not.toBeNull();
+    expect(mutTopic?.title).toBe("Mutable vs Immutable in Python");
+
+    const memTopic = findMatchingTopic("how python manages memory and garbage collection");
+    expect(memTopic).not.toBeNull();
+    expect(memTopic?.title).toBe("Python Memory Management & Garbage Collection");
+
+    const decTopic = findMatchingTopic("explain python decorators");
+    expect(decTopic).not.toBeNull();
+    expect(decTopic?.title).toBe("Python Decorators");
+
+    const genTopic = findMatchingTopic("what are generators and iterators in python");
+    expect(genTopic).not.toBeNull();
+    expect(genTopic?.title).toBe("Generators and Iterators in Python");
+  });
+
+  it("recognizes follow-up interview questions even with technical overlapping words", () => {
+    expect(isLikelyQuestion("mutable vs immutable in python", "mutable vs immutable in python")).toBe(true);
+    expect(isLikelyQuestion("what about garbage collection in python", "what about garbage collection in python")).toBe(true);
+    expect(isLikelyQuestion("tell me about python decorators", "tell me about python decorators")).toBe(true);
+    expect(isLikelyQuestion("how do generators work in python", "how do generators work in python")).toBe(true);
+  });
+
+  it("generates natural project answers from resume evidence without filename placeholders", () => {
+    const evidence = [
+      {
+        id: "ev_1",
+        source_id: "src_resume",
+        project_id: null,
+        source_name: "5. Vinod Resume.pdf",
+        text: "Built a high-throughput event streaming platform using Apache Kafka, Go, and Redis that processed 50,000 events per second with sub-10ms latency.",
+        score: 0.95,
+        locator: "Section 1",
+        verified_contribution: true
+      }
+    ];
+
+    const result = generateHumanAnswer("Vinod what is your recent project", "Senior Software Engineer", { response_delivery: "natural" }, evidence);
+    expect(result.answer).not.toContain("5. Vinod Resume.pdf");
+    expect(result.answer).not.toContain(".pdf");
+    expect(result.answer).toContain("event streaming platform");
+    expect(result.answer).toMatch(/recent project/i);
   });
 });
 

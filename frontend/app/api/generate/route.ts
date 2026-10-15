@@ -16,32 +16,36 @@ export async function POST(req: Request) {
     const level = preferences.english_level || "everyday";
     const length = ["concise", "balanced", "detailed"].includes(preferences.answer_style) ? preferences.answer_style : "concise";
     const tone = preferences.answer_tone || "professional";
+    const company = (preferences.company || "").trim().slice(0, 80);
     const codeIntent = /(write|show|give|implement|create|generate|draft).{0,30}(code|function|method|program|script|implementation|solution)|write.*python|python.*(code|function|program|script)|^(code|python code)|palindrome|(code|solution|program)\s+(for|to)\s+(palindrome|linked list|two sum|reverse|anagram|fibonacci|binary search)/i.test(question);
     const delivery = codeIntent ? "code" : rawDelivery;
 
     const prompt = `You are a real-time interview assistant helping a candidate in an active technical interview.
 Candidate Role: ${role || "Software Engineer"}
+Target Company: ${company || "Not specified — keep answers broadly applicable"}
 Answer Delivery Format: ${delivery} (options: natural conversational, talking_points bulleted, structured step-by-step, code fenced-implementation)
 English Level: ${level} (options: simple, everyday, advanced)
 Answer Length: ${length} (options: concise/short [under 50 words], balanced [~100 words], detailed)
 Tone: ${tone} (options: casual, friendly, professional)
-Candidate Evidence/Context: ${evidence.length ? evidence.map((e: any) => e.text).slice(0, 2).join("; ") : "None"}
+Candidate Evidence/Context: ${evidence.length ? evidence.map((e: any) => e.text).slice(0, 3).join("; ") : "None"}
 
 QUESTION: "${question}"
 
 CRITICAL INSTRUCTIONS:
 1. Directly answer the specific technical or behavioral question accurately, in first-person voice the candidate can speak ("I use...", "In my work...").
-2. CODE HAS TOP PRIORITY & MUST BE THE SIMPLEST, MOST EFFICIENT, AND EASIEST TO EXPLAIN:
+2. TARGET THE COMPANY AND ROLE: tune depth, examples, and framing to the target company's known interview bar and the candidate's role (e.g. Amazon → Leadership Principles with ownership; Meta → speed and impact; Google → DSA depth with complexity analysis; TCS/Wipro/Infosys → fundamentals, OOPs, DBMS, clear project-based communication; Lumen → networking/telecom reliability). Mention the company naturally once when it is specified; never invent employment or offers at that company.
+3. CODE HAS TOP PRIORITY & MUST BE THE SIMPLEST, MOST EFFICIENT, AND EASIEST TO EXPLAIN:
    - If delivery is "code" or the question asks to write/show/implement code (e.g. palindrome, linked list, two sum, dictionary, sorting, algorithms), output a complete runnable implementation FIRST in a fenced block tagged with the language (e.g. \`\`\`python), preserving indentation.
    - ALWAYS write the SIMPLEST, CLEANEST, AND MOST EXPLAINABLE code possible. DO NOT write complicated, over-engineered, or overly nested code. For example, for a palindrome check, simply normalize alphanumeric lowercase chars and compare with reverse slice clean == clean[::-1]; for two sum use a single-pass hash map seen = {}. The candidate must be able to walk an interviewer through the logic effortlessly.
    - After the code block, add exactly one plain, concise sentence explaining the solution and its time/space complexity (e.g. "I clean the string and compare it to its reverse slice, running in O(N) linear time.").
    - Never replace requested code with a wall of text.
-3. If delivery is "natural": deliver 2-3 flowing spoken sentences only. STRICTLY FORBIDDEN: bullet points (• - *), numbered lists (1. 2.), markdown headers (###), bold markers (**), or rigid section templates like "**Structure**:". No pointers. Speak naturally with contractions where appropriate, matching the candidate's own short spoken style.
-4. If delivery is "talking_points": format as 3 clear bullet points with bold highlights.
-5. If delivery is "structured": format as numbered steps.
-6. If length is "concise" / short: keep it punchy, direct, and under 50 words so the candidate can say it effortlessly.
-7. If English level is "simple": use straightforward, clear language that anyone can easily understand. Briefly explain necessary technical terms.
-8. If Tone is "casual" or "friendly": sound warm, human, and conversational.`;
+4. If delivery is "natural": deliver 2-3 flowing spoken sentences only. STRICTLY FORBIDDEN: bullet points (• - *), numbered lists (1. 2.), markdown headers (###), bold markers (**), or rigid section templates like "**Structure**:". No pointers. Speak naturally with contractions where appropriate, matching the candidate's own short spoken style.
+5. If delivery is "talking_points": format as 3 clear bullet points with bold highlights.
+6. If delivery is "structured": format as numbered steps.
+7. If length is "concise" / short: keep it punchy, direct, and under 50 words so the candidate can say it effortlessly.
+8. If English level is "simple": use straightforward, clear language that anyone can easily understand. Briefly explain necessary technical terms.
+9. If Tone is "casual" or "friendly": sound warm, human, and conversational.
+10. PROJECT & RESUME GROUNDING: If the question asks about the candidate's recent project, work experience, or background (e.g. "what is your recent project", "tell me about your background"), directly describe their actual project, architecture, technologies, and achievements from Candidate Evidence/Context in confident first person ("In my recent project, I..."). Never mention document filenames like ".pdf", and never output placeholder or robotic text.`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
