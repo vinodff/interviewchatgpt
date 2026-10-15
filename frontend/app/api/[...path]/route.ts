@@ -2,6 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import { synthesizeLocalAnswer } from "@/lib/answer-generator";
 import type { Evidence, Preferences } from "@/lib/types";
 
+function cleanAnswerText(raw: string, question: string): string {
+  let cleaned = raw.trim();
+
+  // Strip leading headers/meta labels like "Answer:", "Suggested Answer:", "Here is what you should say:"
+  cleaned = cleaned.replace(/^(?:suggested\s+)?answer\s*:\s*/i, "");
+  cleaned = cleaned.replace(/^here(?:'s|\s+is)\s+(?:what\s+you\s+should\s+say|an?\s+answer|the\s+answer|a\s+natural\s+answer)\s*:\s*/i, "");
+  cleaned = cleaned.replace(/^to\s+answer\s+your\s+question\s*,\s*/i, "");
+  cleaned = cleaned.replace(/^(?:note|instructions?)\s*:\s*/i, "");
+
+  // Strip repeating the question at the start
+  const normalizedQ = question.trim().replace(/\?+$/, "").trim();
+  if (normalizedQ.length > 4) {
+    const qRegex = new RegExp(`^(\\*\\*)?${normalizedQ.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\??(\\*\\*)?\\s*[:\\-—]?\\s*`, "i");
+    cleaned = cleaned.replace(qRegex, "").trim();
+  }
+
+  // Strip trailing notes or instructions
+  cleaned = cleaned.replace(/\n+(?:note|instructions?)\s*:\s*.*$/is, "").trim();
+
+  return cleaned;
+}
+
 async function generateAnswerWithGemini(
   question: string,
   preferences: Record<string, unknown> = {},
@@ -65,10 +87,13 @@ ${companyInstruction}
 ${evidencePrompt}
 
 CRITICAL RULES:
-1. Directly and accurately answer the exact question asked. (e.g. if asked "what is list", explain what a list data structure is immediately with time complexities and implementations).
-2. NEVER use generic boilerplate like "Based on my experience in Core Experience & Portfolio...".
-3. Provide concrete technical terms, Big-O complexities, and practical engineering trade-offs where applicable.
-4. Strictly follow the format, length, and company rules above.`;
+1. Output ONLY the exact spoken words the candidate should say aloud in a natural, confident, articulate flow.
+2. DO NOT include the question, question titles, or prompt echoing.
+3. DO NOT include instructions, boilerplate, meta-labels, or preambles (NEVER include 'Question:', 'Answer:', 'Suggested Answer:', 'Instructions:', 'Here is what you should say:', 'To answer your question...', or 'Note:').
+4. Start directly with the answer explanation in the very first sentence.
+5. Provide concrete technical terms, Big-O complexities, and practical engineering trade-offs where applicable.
+6. Strictly follow the format, length, and company rules above.
+7. LANGUAGE: Respond STRICTLY and EXCLUSIVELY in English. Never output in any other language.`;
 
   const maxTokens = style === "concise" ? 220 : style === "detailed" ? 480 : 320;
   const generationConfig = {
@@ -96,7 +121,7 @@ CRITICAL RULES:
         const data = await res.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
         if (text && typeof text === "string" && text.trim().length > 15) {
-          return text.trim();
+          return cleanAnswerText(text.trim(), question);
         }
       }
     } catch {

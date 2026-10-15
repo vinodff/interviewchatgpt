@@ -255,18 +255,15 @@ export function synthesizeLocalAnswer(
 
   if (isCompanyQuestion && companyName) {
     if (format === "structured") {
-      answerText = `**Interest & Alignment with ${companyName}:**\n\n` +
-        `1. **Engineering Impact & Culture:** ${companyName}'s focus on scalable architecture and user-facing reliability deeply aligns with my engineering background.\n\n` +
-        `2. **Technical Alignment:** My track record as a ${role} in building resilient systems and latency-critical services positions me to contribute immediately to ${companyName}'s core initiatives.\n\n` +
-        `3. **Long-Term Value:** Eager to collaborate with high-caliber teams, uphold high engineering standards, and drive measurable product outcomes at ${companyName}.`;
+      answerText = `1. Engineering Impact: ${companyName}'s focus on scalable architecture and reliability deeply aligns with my engineering background.\n\n` +
+        `2. Technical Alignment: My experience as a ${role} building resilient systems and managing distributed latency positions me to contribute immediately.\n\n` +
+        `3. Long-Term Value: I value high engineering rigor, clear code reviews, and delivering measurable product impact.`;
     } else if (format === "natural") {
-      answerText = `I have been following ${companyName}'s technical leadership closely. What excites me most is the intersection of high system scale, engineering excellence, and customer impact.\n\n` +
-        `As a ${role}, I focus on designing maintainable architectures and delivering reliable systems under real-world constraints—principles that mirror ${companyName}'s engineering culture.`;
+      answerText = `I have followed ${companyName}'s technical leadership closely, and I am especially excited by your scale, high engineering standards, and focus on customer impact. In my work as a ${role}, I prioritize building resilient architectures and shipping reliable systems under load—principles that directly align with how ${companyName} builds software.`;
     } else {
-      answerText = `**Why ${companyName}:**\n\n` +
-        `• **High Scale & Architecture:** Strong technical admiration for ${companyName}'s engineering infrastructure and product velocity.\n\n` +
-        `• **Proven Domain Fit:** Solid experience as a ${role} delivering robust, scalable systems that directly map to ${companyName}'s engineering challenges.\n\n` +
-        `• **Engineering Standards:** Committed to rigorous code reviews, automated testing, and continuous operational reliability.`;
+      answerText = `• Scalable Architecture: Strong technical admiration for ${companyName}'s engineering infrastructure and product velocity.\n\n` +
+        `• Proven Experience: Solid background as a ${role} designing resilient systems that solve complex, high-throughput challenges.\n\n` +
+        `• Engineering Rigor: Committed to clean code reviews, automated testing, and continuous operational excellence.`;
     }
   } else if (matchedTopic) {
     let keyPoints = matchedTopic.keyPoints;
@@ -278,53 +275,36 @@ export function synthesizeLocalAnswer(
     }
 
     if (format === "structured") {
-      answerText = `**${matchedTopic.title}**\n\n` +
-        `1. **Core Concept:** ${matchedTopic.definition}\n\n` +
-        `2. **Key Technical Details:**\n` +
-        keyPoints.map(kp => `   • ${kp}`).join("\n") + "\n\n" +
-        (matchedTopic.tradeoffs && style !== "concise" ? `3. **Trade-offs:** ${matchedTopic.tradeoffs}\n\n` : "") +
-        `4. **Key Takeaway:** ${matchedTopic.bestPractices}`;
+      answerText = `1. ${matchedTopic.definition}\n\n` +
+        keyPoints.map((kp, idx) => `${idx + 2}. ${kp}`).join("\n\n") +
+        (matchedTopic.tradeoffs && style !== "concise" ? `\n\n${keyPoints.length + 2}. ${matchedTopic.tradeoffs}` : "");
     } else if (format === "natural") {
-      answerText = `${matchedTopic.definition}\n\n` +
-        (level === "simple" ? `Here is how this works in practice:\n\n` : `When evaluating this in production systems, the key considerations include:\n\n`) +
-        keyPoints.map(kp => `• ${kp}`).join("\n\n") + "\n\n" +
-        (matchedTopic.tradeoffs && style !== "concise" ? `${matchedTopic.tradeoffs}\n\n` : "") +
-        `Summary: ${matchedTopic.bestPractices}`;
+      const pointsText = keyPoints.join(" ");
+      const tradeoffText = matchedTopic.tradeoffs && style !== "concise" ? ` ${matchedTopic.tradeoffs}` : "";
+      const bestPracticeText = matchedTopic.bestPractices ? ` In production, ${matchedTopic.bestPractices.charAt(0).toLowerCase() + matchedTopic.bestPractices.slice(1)}` : "";
+      answerText = `${matchedTopic.definition} ${pointsText}${tradeoffText}${bestPracticeText}`.trim();
     } else {
       // Default: talking_points
-      answerText = `**Definition:** ${matchedTopic.definition}\n\n` +
-        `**Key Points:**\n` +
-        keyPoints.map(kp => `• ${kp}`).join("\n") + "\n\n" +
-        (matchedTopic.tradeoffs && style !== "concise" ? `**Trade-offs:** ${matchedTopic.tradeoffs}\n\n` : "") +
-        `**Best Practice:** ${matchedTopic.bestPractices}`;
-    }
-
-    if (style === "detailed" && relevantEvidence.length > 0 && personalization === "grounded") {
-      answerText += `\n\n**Related Project Experience:** In my work on ${relevantEvidence[0].locator || relevantEvidence[0].source_name}: ${relevantEvidence[0].text.slice(0, 180)}…`;
+      answerText = [
+        `• ${matchedTopic.definition}`,
+        ...keyPoints.map(kp => `• ${kp}`),
+        ...(matchedTopic.tradeoffs && style !== "concise" ? [`• ${matchedTopic.tradeoffs}`] : []),
+        ...(matchedTopic.bestPractices ? [`• Practical Application: ${matchedTopic.bestPractices}`] : [])
+      ].join("\n\n");
     }
   } else {
     // General question synthesis
-    const subject = words.slice(0, 4).join(" ") || "this topic";
     if (format === "structured") {
-      answerText = `Here is how I systematically address **${subject}**:\n\n` +
-        `1. **Clarify Constraints & Core Problem:** Understand the expected inputs, system bottlenecks, and edge cases before jumping into execution.\n\n` +
-        `2. **Architectural Approach:** Evaluate standard technical solutions, prioritize clean abstractions, and balance latency, throughput, and developer velocity.\n\n` +
-        `3. **Validation & Observability:** Implement comprehensive unit and integration testing, coupled with continuous monitoring and metrics to verify correctness.`;
+      answerText = `1. Clarify Constraints: Identify core requirements, expected inputs, and edge cases before implementing.\n\n` +
+        `2. Architectural Trade-offs: Balance time complexity, memory overhead, and maintainability to pick the right pattern.\n\n` +
+        `3. Production Reliability: Build with thorough automated tests, graceful error handling, and end-to-end observability.`;
     } else if (format === "natural") {
-      answerText = `When approaching **${subject}**, I focus on breaking the problem into clear, testable components:\n\n` +
-        `• First, I identify the critical technical trade-offs—such as computational complexity versus memory overhead, or immediate simplicity versus long-term maintainability.\n\n` +
-        `• Next, I implement the solution iteratively, ensuring robust error handling and clear separation of concerns.\n\n` +
-        `• Finally, I validate performance and ensure thorough test coverage and monitoring in production.`;
+      answerText = `I approach this by first clarifying the system constraints and expected inputs before jumping into implementation. Once the requirements are clear, I evaluate key technical trade-offs—such as time complexity versus memory footprint—and select the simplest, most resilient design. Finally, I validate correctness with comprehensive unit and integration tests and ensure proper observability in production.`;
     } else {
       // talking_points
-      answerText = `**Key Considerations for ${subject}:**\n\n` +
-        `• **Direct Approach:** Break down the requirements, validate critical assumptions, and choose the simplest design that satisfies the constraints.\n\n` +
-        `• **Technical Trade-offs:** Balance time complexity, memory footprint, and architectural resilience under load.\n\n` +
-        `• **Execution & Delivery:** Maintain high engineering rigor with automated tests, clear documentation, and proactive stakeholder communication.`;
-    }
-
-    if (relevantEvidence.length > 0 && personalization === "grounded") {
-      answerText += `\n\n**Direct Evidence:** Based on ${relevantEvidence[0].source_name}: ${relevantEvidence[0].text.slice(0, 200)}…`;
+      answerText = `• Core Requirements: Clarify inputs, performance constraints, and edge cases before implementation.\n\n` +
+        `• Technical Trade-offs: Balance algorithmic time complexity, memory overhead, and architectural simplicity.\n\n` +
+        `• Production Reliability: Ensure automated test coverage, robust error handling, and active monitoring.`;
     }
   }
 

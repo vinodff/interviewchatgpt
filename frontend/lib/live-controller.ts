@@ -49,12 +49,27 @@ export class LiveController {
   }
 
   /**
+   * Validates that speech is strictly English.
+   * Rejects non-Latin characters and foreign language scripts (Cyrillic, Arabic, Chinese, Devanagari, Telugu, Tamil, Japanese, Korean, Thai, etc.)
+   */
+  public isEnglishSpeech(text: string): boolean {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    // Reject non-Latin characters / foreign scripts
+    if (/[^\u0000-\u024F\u2000-\u206F\u2E00-\u2E7F]/u.test(trimmed)) {
+      return false;
+    }
+    // Must contain Latin letters
+    return /[a-zA-Z]/.test(trimmed);
+  }
+
+  /**
    * Distinguishes between Candidate Speech (answering/narrating) and Interviewer Questions.
    * If the candidate is speaking their answer, we do NOT trigger a new question generation.
    */
   private classifySpeech(text: string): "candidate" | "question" | "filler" {
     const cleaned = text.trim();
-    if (!cleaned) return "filler";
+    if (!cleaned || !this.isEnglishSpeech(cleaned)) return "filler";
     const lower = cleaned.toLowerCase().replace(/[^a-z0-9 ?]/g, " ");
     const words = lower.split(/\s+/).filter(Boolean);
 
@@ -389,7 +404,7 @@ export class LiveController {
 
         const dispatchProcessedSpeech = (transcriptText: string) => {
           const cleaned = transcriptText.trim();
-          if (!cleaned || this.stopped) return;
+          if (!cleaned || this.stopped || !this.isEnglishSpeech(cleaned)) return;
 
           const classification = this.classifySpeech(cleaned);
           if (classification === "filler") return;
@@ -434,7 +449,7 @@ export class LiveController {
             if (event.results[i]?.isFinal) final += transcript;
             else interim += transcript;
           }
-          if (interim.trim() && !this.stopped) {
+          if (interim.trim() && !this.stopped && this.isEnglishSpeech(interim.trim())) {
             const isCandidate = /^(i|i'm|i've|we|yes|yeah|sure|in my)\b/i.test(interim.trim());
             this.notify({
               type: "transcript",
@@ -444,7 +459,7 @@ export class LiveController {
               final: false
             });
           }
-          if (final.trim() && !this.stopped) {
+          if (final.trim() && !this.stopped && this.isEnglishSpeech(final.trim())) {
             const finalText = final.trim();
             if (this.questionDebounceTimer) clearTimeout(this.questionDebounceTimer);
             this.questionDebounceTimer = setTimeout(() => {

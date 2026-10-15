@@ -225,3 +225,21 @@ describe("display-only answer hold", () => {
     expect(notify).not.toHaveBeenCalled(); await live.stop();
   });
 });
+
+describe("English-only speech recognition and clean natural answer synthesis", () => {
+  it("validates English speech and rejects foreign language scripts", () => {
+    const live = new LiveController(vi.fn(), vi.fn());
+    expect(live.isEnglishSpeech("What is a binary search tree?")).toBe(true);
+    expect(live.isEnglishSpeech("I have 5 years of experience building microservices")).toBe(true);
+    expect(live.isEnglishSpeech("Can you explain React useEffect hooks?")).toBe(true);
+
+    // Foreign scripts: Cyrillic, Chinese, Arabic, Devanagari, Telugu
+    expect(live.isEnglishSpeech("Что такое дерево поиска?")).toBe(false);
+    expect(live.isEnglishSpeech("什么是二叉搜索树？")).toBe(false);
+    expect(live.isEnglishSpeech("ما هي شجرة البحث الثنائية؟")).toBe(false);
+    expect(live.isEnglishSpeech("बाइनरी सर्च ट्री क्या है?")).toBe(false);
+    expect(live.isEnglishSpeech("బైనరీ సెర్చ్ ట్రీ అంటే ఏమిటి?")).toBe(false);
+    expect(live.isEnglishSpeech("   ")).toBe(false);
+    expect(live.isEnglishSpeech("???!!!")).toBe(false);
+  });
+});

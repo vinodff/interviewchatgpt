@@ -57,4 +57,26 @@ describe("safe fenced answer formatting", () => {
     const text = markup.replace(/<[^>]*>/g, "").replace(/&(?:amp|lt|gt|quot|#x27);/g, entity => entities[entity]);
     expect(text).toBe(answer);
   });
+
+  it("ensures synthesizeLocalAnswer produces clean natural answers without robotic section headers or question repeats", async () => {
+    const { synthesizeLocalAnswer } = await import("@/lib/answer-generator");
+    const res = synthesizeLocalAnswer("What is a list?", { response_delivery: "natural", english_level: "simple" });
+
+    // Must not contain robotic scaffolding labels
+    expect(res.answer).not.toContain("**Definition:**");
+    expect(res.answer).not.toContain("**Key Points:**");
+    expect(res.answer).not.toContain("**Trade-offs:**");
+    expect(res.answer).not.toContain("**Best Practice:**");
+    expect(res.answer).not.toContain("Related Project Experience");
+    expect(res.answer).not.toContain("Direct Evidence");
+
+    // Must not echo the question at the start
+    expect(res.answer.startsWith("What is a list")).toBe(false);
+    expect(res.answer.startsWith("Here is how I address")).toBe(false);
+    expect(res.answer.startsWith("When approaching")).toBe(false);
+
+    // Must start directly with the concept explanation
+    expect(res.answer).toMatch(/^[A-Z]/);
+    expect(res.answer).toContain("list is an ordered");
+  });
 });

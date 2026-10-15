@@ -995,9 +995,10 @@ class LiveOrchestrator:
 
     def _answer_prompt(self, question: str, evidence: list[dict], decision: QuestionDecision | None = None) -> str:
         return (
-            "Suggest a concise, natural spoken answer for this authorized live interview or meeting. Use the "
-            "requested language and style; for spoken explanations normally 3-6 sentences, directly address follow-ups, and include a "
-            "small concrete example when useful. Do not repeat the question or add greeting/preamble. "
+            "Suggest a concise, natural spoken answer strictly in English for this authorized live interview or meeting. Output "
+            "ONLY the clean spoken answer words that the candidate will say aloud in a natural, articulate flow. Do not repeat "
+            "the question, include question titles, or add any greeting, preamble, instructions, or meta-labels (never write "
+            "'Answer:', 'Suggested Answer:', 'Instructions:', 'Here is what to say:', or 'Note:'). "
             "Keep source locators out of spoken answer text; supporting evidence is displayed separately.\n"
             "QUESTION TYPE HANDLING:\n"
             "1. PURE CONCEPTUAL / TECHNICAL QUESTIONS (e.g. 'What is a function in Python?', 'Explain inheritance', 'How does indexing work in Postgres?'):\n"
