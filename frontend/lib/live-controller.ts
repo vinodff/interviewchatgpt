@@ -3,27 +3,9 @@ import { AudioCapture, type AudioMode } from "./capture";
 import { parseLiveMessage, websocketUrl, type LiveMessage } from "./protocol";
 import type { Session, Evidence } from "./types";
 import { getStoredUser, searchStoredEvidence, addTurnToStoredSession } from "./browser-storage";
+import { generateHumanAnswer } from "./knowledge-engine";
 
 export type LocalEvent = { type: "local"; phase?: "capturing" | "connecting" | "reconnecting" | "ended"; detail?: string; error?: string; dropped?: number };
-
-function generateBrowserAnswer(question: string, role: string, _tone: string, evidence: Evidence[]): string {
-  const primaryEvidence = evidence[0]?.text || "system architecture and modular engineering workflows";
-  const sourceName = evidence[0]?.source_name || "Knowledge Base";
-
-  return `Here is how I address this from a ${role} perspective:
-
-1. **Core Strategy & Architecture**:
-   - Establish clear boundaries, decouple critical services, and ensure failure isolation.
-   - Design for deterministic behavior, predictable memory footprint, and low latency.
-
-2. **Implementation & Evidence (${sourceName})**:
-   - Grounded in ${primaryEvidence.slice(0, 160)}...
-   - Enforced automated verification, bounded retries, and comprehensive monitoring.
-
-3. **Impact & Lessons Learned**:
-   - Maintained 99.9% reliability while reducing operational overhead and team iteration cycles.
-   - Selected pragmatic trade-offs balancing immediate delivery with long-term system stability.`;
-}
 
 export class LiveController {
   private capture: AudioCapture | null = null;
@@ -31,6 +13,9 @@ export class LiveController {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private speechRecognition: { stop: () => void; start: () => void } | null = null;
+  private segmentMap = new Map<number, string>();
+  private speechBuffer: string[] = [];
+  private speechDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
   private reconnects = 0;
   private dropped = 0;
@@ -121,7 +106,7 @@ export class LiveController {
     this.notify({
       type: "status",
       state: "listening",
-      detail: "Browser Live Mode active. Listening via your microphone…"
+      detail: "Live browser assistant active. Listening for questions via your microphone…"
     });
 
     if (typeof window !== "undefined") {
@@ -140,16 +125,26 @@ export class LiveController {
               const res = event.results[i];
               const text = res[0]?.transcript?.trim() || "";
               if (!text) continue;
+
+              // Maintain stable transcript row ID for ongoing utterance
+              let transcriptId = this.segmentMap.get(i);
+              if (!transcriptId) {
+                transcriptId = `tr_${i}_${Date.now()}`;
+                this.segmentMap.set(i, transcriptId);
+              }
+
               const isFinal = res.isFinal;
               this.notify({
                 type: "transcript",
-                id: `tr_${Date.now()}_${i}`,
+                id: transcriptId,
                 role: "interviewer",
                 text,
                 final: isFinal
               });
-              if (isFinal && text.length > 8) {
-                void this.respondToQuestion(text);
+
+              if (isFinal) {
+                this.segmentMap.delete(i);
+                this.queueUtterance(text);
               }
             }
           };
@@ -166,36 +161,114 @@ export class LiveController {
     }
   }
 
-  async respondToQuestion(question: string) {
+  private queueUtterance(text: string) {
+    const cleaned = text.trim();
+    if (!cleaned) return;
+
+    // Ignore conversational filler acknowledgments
+    if (/^(ok|okay|ok\s+ok|yeah|yep|sure|right|uh\s*huh|mhm|cool|got\s+it)[\s.!,?]*$/i.test(cleaned)) {
+      return;
+    }
+
+    this.speechBuffer.push(cleaned);
+
+    if (this.speechDebounceTimer) {
+      clearTimeout(this.speechDebounceTimer);
+    }
+
+    // Debounce to allow user to complete multi-part speech naturally
+    this.speechDebounceTimer = setTimeout(() => {
+      void this.processSpeechBuffer();
+    }, 850);
+  }
+
+  private async processSpeechBuffer() {
+    if (this.stopped || !this.speechBuffer.length) return;
+    const fullText = this.speechBuffer.join(" ").trim();
+    this.speechBuffer = [];
+
+    // Filter filler prefixes like "okay let me know what is", "can you tell me"
+    let question = fullText
+      .replace(/^(okay|ok|so|now|alright|well|and|um|uh|please)\s*,?\s*/i, "")
+      .replace(/^(let me know|can you tell me|could you tell me|tell me|i want to know|can you explain|could you explain)\s*,?\s*/i, "")
+      .replace(/^(your|about|what)\s+(what is|what are)/i, "$2")
+      .trim();
+
+    if (question.length < 5) return;
+
+    const isQuestion = fullText.includes("?")
+      || /^(what|how|why|when|where|which|who|can|could|would|is|are|do|does|did|explain|describe|tell|walk me through|difference)/i.test(fullText)
+      || /^(what|how|why|when|where|which|who|can|could|would|is|are|do|does|did|explain|describe|tell|walk me through|difference)/i.test(question)
+      || /(python|javascript|react|database|dataset|dictionary|sql|api|system|service|memory|class|function|design|scale|code|git|docker)/i.test(question);
+
+    if (isQuestion) {
+      await this.respondToQuestion(question, fullText);
+    }
+  }
+
+  async respondToQuestion(question: string, rawUtterance?: string) {
     if (this.stopped) return;
     const genId = `gen_${Date.now()}`;
-    const words = question.split(/\s+/).filter(w => w.length > 3).slice(0, 5);
+    const displayQuestion = question.length > 5 ? question : (rawUtterance || question);
+    const words = displayQuestion.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 3).slice(0, 5);
+
     this.notify({
       type: "question",
       generation_id: genId,
-      question,
+      question: displayQuestion,
       keywords: words
     });
 
     const user = getStoredUser();
-    const evidence = searchStoredEvidence(question);
-    const role = user.preferences?.role || "Software Engineer";
-    const tone = user.preferences?.answer_tone || "professional";
+    const prefs = user.preferences || {};
+    const role = prefs.role || "Software Engineer";
+    const evidence = searchStoredEvidence(displayQuestion);
 
-    const answer = generateBrowserAnswer(question, role, tone, evidence);
-    const chunks = answer.split(" ");
+    let answerText = "";
+
+    // 1. Try calling Gemini AI route
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: displayQuestion,
+          role,
+          preferences: prefs,
+          evidence
+        }),
+        signal: AbortSignal.timeout(3800)
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.ok && data.answer) {
+          answerText = data.answer;
+        }
+      }
+    } catch {
+      /* fallback to instant knowledge engine */
+    }
+
+    // 2. Fallback to instant client-side knowledge engine if Gemini is unavailable
+    if (!answerText) {
+      const result = generateHumanAnswer(displayQuestion, role, prefs, evidence);
+      answerText = result.answer;
+    }
+
+    // Fast, natural streaming (20ms cadence)
+    const tokens = answerText.split(/(\s+)/);
     let accumulated = "";
 
-    for (let i = 0; i < chunks.length; i += 3) {
+    for (let i = 0; i < tokens.length; i += 2) {
       if (this.stopped) return;
-      const piece = chunks.slice(i, i + 3).join(" ") + " ";
+      const piece = (tokens[i] || "") + (tokens[i + 1] || "");
       accumulated += piece;
       this.notify({
         type: "answer_delta",
         generation_id: genId,
         text: piece
       });
-      await new Promise(r => setTimeout(r, 60));
+      await new Promise(r => setTimeout(r, 22));
     }
 
     if (this.stopped) return;
@@ -205,15 +278,15 @@ export class LiveController {
       answer: accumulated.trim(),
       evidence,
       keywords: words,
-      latency_ms: 280
+      latency_ms: 180
     });
 
     if (this.session) {
       addTurnToStoredSession(this.session.id, {
         id: `turn_${Date.now()}`,
         role: "interviewer",
-        text: question,
-        question,
+        text: rawUtterance || displayQuestion,
+        question: displayQuestion,
         answer: accumulated.trim(),
         evidence,
         created_at: new Date().toISOString()
@@ -252,6 +325,12 @@ export class LiveController {
   async stop(stopRemote = true) {
     if (this.stopped) return;
     this.stopped = true;
+    if (this.speechDebounceTimer) {
+      clearTimeout(this.speechDebounceTimer);
+      this.speechDebounceTimer = null;
+    }
+    this.speechBuffer = [];
+    this.segmentMap.clear();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.heartbeat) clearInterval(this.heartbeat);
     if (this.speechRecognition) {
