@@ -1,7 +1,7 @@
 import { api, ApiError, messageOf, post } from "./api";
 import { AudioCapture, type AudioMode } from "./capture";
 import { parseLiveMessage, websocketUrl, type LiveMessage } from "./protocol";
-import type { Evidence, Session, User } from "./types";
+import type { Evidence, Preferences, Session, User } from "./types";
 import { addTurnToStoredSession, createStoredSession, getStoredUser, searchStoredEvidence, stopStoredSession } from "./browser-storage";
 import { synthesizeLocalAnswer } from "./answer-generator";
 
@@ -38,8 +38,13 @@ export class LiveController {
   private questionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private currentAnswerText = "";
   private answeringQuestion = false;
+  private currentPreferences: Preferences | null = null;
 
   constructor(private notify: (event: LiveMessage | LocalEvent) => void, private onSession: (session: Session) => void) {}
+
+  public setPreferences(preferences?: Preferences): void {
+    this.currentPreferences = preferences || null;
+  }
 
   askQuestion(questionText: string): void {
     const trimmed = questionText.trim();
@@ -112,7 +117,25 @@ export class LiveController {
       return "candidate";
     }
 
-    return words.length >= 3 ? "question" : "filler";
+    // Every word matters in an interview: a 1-2 word substantive utterance
+    // ("algorithm?", "recursion?") is a real question, not filler.
+    // Only pure filler vocabulary is dropped here.
+    const substantive = words.some(w => w.length > 3 && !FILLERS.has(w));
+    if (words.length >= 3) return "question";
+    if (substantive) return "question";
+    return "filler";
+  }
+
+  /**
+   * A trailing incomplete fragment ("what is", "tell me about", "how does")
+   * must not fire alone: the speaker is mid-question and the tail word
+   * ("algorithm") is still coming. Hold it for the continuation window.
+   */
+  private isIncompleteQuestion(text: string): boolean {
+    const lower = text.trim().toLowerCase().replace(/[^a-z0-9 ']/g, " ").replace(/\s+/g, " ").trim();
+    if (!lower) return false;
+    return /\b(what|what's|whats|how|why|who|where|when|which|is|are|was|were|do|does|did|can|could|would|should|tell|explain|describe|about|of|in|on|for|to|with|and|or|the|a|an)\s*$/.test(lower)
+      || /^(tell me|tell me about|what about|how about|can you|could you|would you)\s*$/i.test(lower.trim());
   }
 
   /** Hold display updates only. Capture, speaker events, lifecycle, and backend generation continue. */
@@ -396,22 +419,61 @@ export class LiveController {
       const windowObj = typeof window !== "undefined" ? (window as unknown as { SpeechRecognition?: new () => SpeechInstance; webkitSpeechRecognition?: new () => SpeechInstance }) : null;
       const Speech = windowObj ? (windowObj.SpeechRecognition || windowObj.webkitSpeechRecognition) : null;
       if (Speech) {
-        const isMobile = typeof navigator !== "undefined" && (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (typeof window !== "undefined" && window.innerWidth < 768));
         const recognition = new Speech();
-        recognition.continuous = !isMobile;
+        // Predictable mobile capture: continuous MUST stay true on mobile.
+        // With continuous=false, Android/Chrome ends the utterance at the first
+        // micro-pause, so "what is algorithm" finalizes as "what is" and the
+        // tail word never arrives. continuous=true keeps the mic open across
+        // pauses; mobile auto-stops (~60s) are recovered via onend restart
+        // with the pending phrase carried over, so no word is lost.
+        recognition.continuous = true;
         recognition.interimResults = true;
         recognition.lang = "en-US";
+        try { (recognition as unknown as { maxAlternatives?: number }).maxAlternatives = 1; } catch { /* optional */ }
+
+        // Utterance buffering: the Web Speech API fragments one spoken
+        // sentence into several final chunks ("what is" + "algorithm").
+        // Dispatching each chunk immediately both splits the question and
+        // drops the tail (a lone "algorithm" looks like filler). Instead we
+        // accumulate accumulated_final_chunks + current_interim_chunk per the
+        // speech-pipeline invariant and finalize only after a real silence
+        // pause, so every word is included. Interim replaces (stable id),
+        // never concatenates.
+        const INTERIM_ID = "tr_interim_live";
+        const SILENCE_MS = 1200;
+        const INCOMPLETE_HOLD_MS = 1900;
+        const DEDUP_WINDOW_MS = 4000;
+        let windowFinal = "";
+        let windowInterim = "";
+        let carry = "";
+        let lastDispatchedText = "";
+        let lastDispatchedAt = 0;
+        let lastDispatchedRole: string | null = null;
+
+        const currentPhrase = (): string =>
+          `${carry ? `${carry} ` : ""}${windowFinal ? `${windowFinal} ` : ""}${windowInterim}`.replace(/\s+/g, " ").trim();
 
         const dispatchProcessedSpeech = (transcriptText: string) => {
-          const cleaned = transcriptText.trim();
+          const cleaned = transcriptText.trim().replace(/\s+/g, " ");
           if (!cleaned || this.stopped || !this.isEnglishSpeech(cleaned)) return;
+
+          // Self-echo / duplicate protection: only exact (or near-exact)
+          // consecutive repeats within 4s are dropped, per invariant.
+          const now = Date.now();
+          const norm = cleaned.toLowerCase();
+          const lastNorm = lastDispatchedText.toLowerCase();
+          if (lastNorm && now - lastDispatchedAt < DEDUP_WINDOW_MS && (norm === lastNorm || (lastNorm.startsWith(norm) && norm.length >= lastNorm.length - 2) || (norm.startsWith(lastNorm) && norm.length <= lastNorm.length + 2))) return;
 
           const classification = this.classifySpeech(cleaned);
           if (classification === "filler") return;
 
+          lastDispatchedText = cleaned;
+          lastDispatchedAt = now;
+
           if (classification === "candidate") {
             // Candidate is narrating/speaking their answer!
             // Attribute to candidate ('You: ...') and DO NOT trigger answer generation
+            lastDispatchedRole = "user";
             this.notify({
               type: "transcript",
               id: `tr_user_${Date.now()}`,
@@ -423,6 +485,7 @@ export class LiveController {
           }
 
           // It's an Interviewer Question!
+          lastDispatchedRole = "interviewer";
           let cleanQuestion = cleaned;
           const words = cleaned.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).filter(Boolean);
           const FILLERS = new Set(["okay", "ok", "yeah", "yes", "um", "uh", "so", "right", "sure", "well", "hello", "hi", "testing", "ah"]);
@@ -441,37 +504,86 @@ export class LiveController {
           void this.handleBrowserQuestion(cleanQuestion);
         };
 
-        recognition.onresult = (event: SpeechEvent) => {
-          let interim = "";
-          let final = "";
-          for (let i = event.resultIndex; i < event.results.length; ++i) {
-            const transcript = event.results[i]?.[0]?.transcript || "";
-            if (event.results[i]?.isFinal) final += transcript;
-            else interim += transcript;
+        const flushUtterance = () => {
+          if (this.questionDebounceTimer) clearTimeout(this.questionDebounceTimer);
+          this.questionDebounceTimer = null;
+          const phrase = currentPhrase();
+          windowFinal = "";
+          windowInterim = "";
+          carry = "";
+          if (!phrase) return;
+          // Cross-pause stitching (speaker-isolation invariant): never stitch
+          // onto candidate speech. If the previously dispatched interviewer
+          // turn ended on an explicit incomplete connector ("tell me about",
+          // "what is") and the new fragment arrives promptly, combine them so
+          // the tail word is not lost as a separate orphan utterance.
+          if (
+            lastDispatchedRole === "interviewer" &&
+            lastDispatchedText &&
+            Date.now() - lastDispatchedAt < DEDUP_WINDOW_MS &&
+            this.isIncompleteQuestion(lastDispatchedText)
+          ) {
+            const combined = `${lastDispatchedText} ${phrase}`.replace(/\s+/g, " ").trim();
+            // Bypass the near-duplicate guard for this intentional combine:
+            // dispatch the lengthened question as the corrected turn.
+            lastDispatchedText = "";
+            dispatchProcessedSpeech(combined);
+            return;
           }
-          if (interim.trim() && !this.stopped && this.isEnglishSpeech(interim.trim())) {
-            const isCandidate = /^(i|i'm|i've|we|yes|yeah|sure|in my)\b/i.test(interim.trim());
+          dispatchProcessedSpeech(phrase);
+        };
+
+        const armSilenceTimer = (phrase: string) => {
+          if (this.questionDebounceTimer) clearTimeout(this.questionDebounceTimer);
+          // Incomplete prefix ("what is") gets a longer hold so the tail
+          // word ("algorithm") lands in the SAME utterance instead of
+          // firing early as a truncated question.
+          const hold = this.isIncompleteQuestion(phrase) ? INCOMPLETE_HOLD_MS : SILENCE_MS;
+          this.questionDebounceTimer = setTimeout(flushUtterance, hold);
+        };
+
+        recognition.onresult = (event: SpeechEvent) => {
+          if (this.stopped) return;
+          // Per invariant: current phrase = accumulated_final_chunks (ALL
+          // finals in this recognition window, not just from resultIndex)
+          // + current_interim_chunk. Interim replaces, never concatenates.
+          let finals = "";
+          let interimChunk = "";
+          for (let i = 0; i < event.results.length; ++i) {
+            const transcript = event.results[i]?.[0]?.transcript || "";
+            if (!transcript) continue;
+            if (event.results[i]?.isFinal) finals += `${transcript} `;
+            else interimChunk += `${transcript} `;
+          }
+          windowFinal = finals.replace(/\s+/g, " ").trim();
+          windowInterim = interimChunk.replace(/\s+/g, " ").trim();
+          const phrase = currentPhrase();
+          if (!phrase) return;
+          // Live interim preview with a STABLE id so the UI replaces the
+          // previous preview in place (same pattern as the backend's
+          // transcript_id reuse). Predictable, no transcript-list flooding.
+          if (this.isEnglishSpeech(phrase)) {
+            const isCandidate = /^(i|i'm|i've|i'd|i'll|we|we've|yes|yeah|sure|in my|my)\b/i.test(phrase);
             this.notify({
               type: "transcript",
-              id: `tr_interim_${Date.now()}`,
+              id: INTERIM_ID,
               role: isCandidate ? "user" : "interviewer",
-              text: interim.trim(),
+              text: phrase,
               final: false
             });
           }
-          if (final.trim() && !this.stopped && this.isEnglishSpeech(final.trim())) {
-            const finalText = final.trim();
-            if (this.questionDebounceTimer) clearTimeout(this.questionDebounceTimer);
-            this.questionDebounceTimer = setTimeout(() => {
-              dispatchProcessedSpeech(finalText);
-            }, 450);
-          }
+          // Every onresult restarts the silence clock: the utterance only
+          // finalizes after the speaker actually pauses, so tail words are
+          // never cut off.
+          armSilenceTimer(phrase);
         };
 
         recognition.onerror = (event: { error?: string }) => {
           const err = event?.error;
           if (err === "no-speech") return;
           if (err === "audio-capture" || err === "aborted") {
+            // Keep the pending phrase: the restart continues the same
+            // utterance instead of dropping its tail.
             setTimeout(() => {
               if (!this.stopped && this.browserRecognition) {
                 try { recognition.start(); } catch { /* ignore */ }
@@ -480,6 +592,8 @@ export class LiveController {
             return;
           }
           if (err === "not-allowed") {
+            if (this.questionDebounceTimer) clearTimeout(this.questionDebounceTimer);
+            this.questionDebounceTimer = null;
             this.notify({
               type: "local",
               error: "Microphone permission is blocked. Tap the lock/settings icon in your browser address bar to allow microphone access."
@@ -488,13 +602,29 @@ export class LiveController {
         };
 
         recognition.onend = () => {
-          if (!this.stopped && this.browserRecognition) {
-            setTimeout(() => {
-              if (!this.stopped && this.browserRecognition) {
-                try { recognition.start(); } catch { /* ignore */ }
-              }
-            }, isMobile ? 80 : 250);
+          if (this.stopped || !this.browserRecognition) return;
+          // Mobile OS stops recognition at pauses/auto-limits: flush what
+          // was heard (carries "algorithm" with it) BEFORE restarting, then
+          // restart fast so the next words are captured. Pending audio is
+          // preserved in `carry` when the flush was an incomplete prefix.
+          const pending = currentPhrase();
+          if (pending) {
+            // Give the engine a beat to deliver a trailing final chunk
+            // before we finalize, then restart listening.
+            if (this.isIncompleteQuestion(pending)) {
+              carry = carry ? `${carry} ${windowFinal} ${windowInterim}`.replace(/\s+/g, " ").trim() : `${windowFinal} ${windowInterim}`.replace(/\s+/g, " ").trim();
+              windowFinal = "";
+              windowInterim = "";
+              armSilenceTimer(carry);
+            } else {
+              flushUtterance();
+            }
           }
+          setTimeout(() => {
+            if (!this.stopped && this.browserRecognition) {
+              try { recognition.start(); } catch { /* ignore */ }
+            }
+          }, 120);
         };
 
         recognition.start();
@@ -522,9 +652,11 @@ export class LiveController {
       user = getStoredUser();
     } catch { /* ignore */ }
 
+    const activePreferences = this.currentPreferences || user?.preferences;
+
     // STAGE 1: Instant Local Synthesis (< 25ms!)
     // The candidate immediately gets structured, high-signal talking points on screen with 0 wait time.
-    const instantLocal = synthesizeLocalAnswer(questionText, user?.preferences, evidence);
+    const instantLocal = synthesizeLocalAnswer(questionText, activePreferences, evidence);
     this.currentAnswerText = instantLocal.answer;
 
     this.notify({
@@ -556,7 +688,7 @@ export class LiveController {
         const res = await fetch("/api/live/answer", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: questionText, preferences: user?.preferences, evidence })
+          body: JSON.stringify({ question: questionText, preferences: activePreferences, evidence })
         });
         if (res.ok && !this.stopped) {
           const data = await res.json();

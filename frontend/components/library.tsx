@@ -31,13 +31,15 @@ export function Library({ projects, sources, refresh, notice, loading }: { proje
         if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name} is larger than the 20 MB limit.`);
         const form = new FormData(); form.append("file", file); if (project) form.append("project_id", project);
         try {
-          await api<Source>("/sources/upload", { method: "POST", body: form }); count++;
+          await uploadStoredSource(file, project || null);
+          count++;
+        } catch (err) {
+          setError(messageOf(err));
+        }
+        try {
+          await api<Source>("/sources/upload", { method: "POST", body: form });
         } catch {
-          try {
-            await uploadStoredSource(file, project || null); count++;
-          } catch (err) {
-            setError(messageOf(err));
-          }
+          // Local storage is primary
         }
       }
       if (count) notice(`${count} ${count === 1 ? "source" : "sources"} uploaded. Ready for live answers.`);

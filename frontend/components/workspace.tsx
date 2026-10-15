@@ -107,30 +107,50 @@ export function Workspace() {
     if (dataRequest.current === request) refreshInFlight.current = false;
     if (request.signal.aborted || epoch !== authEpoch.current) return;
 
-    if (results[0].status === "fulfilled") {
-      setProjects(results[0].value);
-    } else {
-      try { setProjects(getStoredProjects()); } catch { /* ignore */ }
+    let finalProjects: Project[] = [];
+    try { finalProjects = getStoredProjects(); } catch { /* ignore */ }
+    if (results[0].status === "fulfilled" && Array.isArray(results[0].value) && results[0].value.length > 0) {
+      const existingIds = new Set(finalProjects.map(p => p.id));
+      for (const p of results[0].value) {
+        if (!existingIds.has(p.id)) finalProjects.push(p);
+      }
     }
+    setProjects(finalProjects);
 
-    if (results[1].status === "fulfilled") {
-      setSources(results[1].value);
-    } else {
-      try { setSources(getStoredSources()); } catch { /* ignore */ }
+    let finalSources: Source[] = [];
+    try { finalSources = getStoredSources(); } catch { /* ignore */ }
+    if (results[1].status === "fulfilled" && Array.isArray(results[1].value) && results[1].value.length > 0) {
+      const existingIds = new Set(finalSources.map(s => s.id));
+      for (const s of results[1].value) {
+        if (!existingIds.has(s.id)) finalSources.push(s);
+      }
     }
+    setSources(finalSources);
 
-    if (results[2].status === "fulfilled") {
-      setSessions(results[2].value);
-    } else {
-      try { setSessions(getStoredSessions()); } catch { /* ignore */ }
+    let finalSessions: Session[] = [];
+    try { finalSessions = getStoredSessions(); } catch { /* ignore */ }
+    if (results[2].status === "fulfilled" && Array.isArray(results[2].value) && results[2].value.length > 0) {
+      const existingIds = new Set(finalSessions.map(s => s.id));
+      for (const s of results[2].value) {
+        if (!existingIds.has(s.id)) finalSessions.push(s);
+      }
     }
+    setSessions(finalSessions);
 
     if (results[3].status === "fulfilled") {
       const me = results[3].value;
       if (me.id !== identity.current) {
         authEpoch.current++; setAuthVersion(authEpoch.current); identity.current = me.id; setNotice("");
       }
-      setUser(me);
+      let stored: User | null = null;
+      try { stored = getStoredUser(); } catch { /* ignore */ }
+      setUser({
+        ...me,
+        preferences: {
+          ...(me.preferences || {}),
+          ...(stored?.preferences || {})
+        }
+      });
     } else {
       setUser(prev => prev || getInitialUser());
     }

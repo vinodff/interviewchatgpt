@@ -59,43 +59,49 @@ async function generateAnswerWithGemini(
   const formatInstruction = format === "structured"
     ? "Format: Step-by-step numbered points (1. Core Concept, 2. Technical Details, 3. Trade-offs / Architecture)."
     : format === "natural"
-      ? "Format: Natural, spoken conversational answer (1-2 crisp, flowing paragraphs as if speaking directly to the interviewer)."
-      : "Format: Talking points (2-4 punchy bullet points with bold keywords).";
+      ? "Format: Natural spoken conversational flow. Speak spontaneously like an authentic human engineer in an interview. Never sound like a textbook, reading an essay, or a robotic script."
+      : "Format: Talking points (2-4 crisp bullet points with bold keywords).";
 
   const levelInstruction = level === "simple"
-    ? "English Level: Simple, everyday English. Explain clearly without unnecessary complex academic jargon."
+    ? "English Level: Simple English. Use plain everyday words, short sentences, and direct explanations. Avoid dense academic jargon."
     : level === "advanced"
-      ? "English Level: Advanced, rigorous engineering terminology. Use precise computer science vocabulary and architectural terms."
-      : "English Level: Everyday natural engineering English.";
+      ? "English Level: Advanced engineering vocabulary. Use precise computer science terminology and architectural concepts."
+      : "English Level: Everyday natural engineering English. Clear, straightforward communication.";
 
   const lengthInstruction = style === "concise"
-    ? "Length: Short and concise (under 120 words). High signal, zero filler."
+    ? "Length: Short and concise (under 75 words / 3-4 spoken sentences). High signal, zero fluff, easy to speak aloud in 20 seconds."
     : style === "detailed"
-      ? "Length: Detailed (250-320 words). Include implementation trade-offs, edge cases, and architectural considerations."
-      : "Length: Balanced (160-220 words).";
+      ? "Length: Detailed (220-280 words). Deep-dive into trade-offs, architecture, and internals."
+      : "Length: Balanced (120-170 words / 2 concise spoken paragraphs).";
+
+  const toneInstruction = tone === "friendly"
+    ? "Tone: Warm, collaborative, communicative, and natural. Speak like an engaging teammate using natural first-person contractions ('I've', 'we're', 'it's', 'I find that')."
+    : tone === "casual"
+      ? "Tone: Relaxed, colloquial spoken phrasing ('Honestly, the way I look at this is...'). Authentic and relatable."
+      : "Tone: Confident, direct, and professional engineering tone.";
 
   const prompt = `You are an expert real-time AI interview co-pilot helping a candidate during a live interview.
 Provide an immediate, exact, and direct answer to the interviewer's question.
 
 Question: "${question}"
 Candidate Role: ${role}
-Tone: ${tone}
+${toneInstruction}
 ${formatInstruction}
 ${levelInstruction}
 ${lengthInstruction}
 ${companyInstruction}
 ${evidencePrompt}
 
-CRITICAL RULES:
-1. Output ONLY the exact spoken words the candidate should say aloud in a natural, confident, articulate flow.
-2. DO NOT include the question, question titles, or prompt echoing.
-3. DO NOT include instructions, boilerplate, meta-labels, or preambles (NEVER include 'Question:', 'Answer:', 'Suggested Answer:', 'Instructions:', 'Here is what you should say:', 'To answer your question...', or 'Note:').
-4. Start directly with the answer explanation in the very first sentence.
-5. Provide concrete technical terms, Big-O complexities, and practical engineering trade-offs where applicable.
-6. Strictly follow the format, length, and company rules above.
+CRITICAL SPOKEN DELIVERY RULES:
+1. Output ONLY the exact spoken words the candidate should say aloud in a natural, spontaneous, articulate flow.
+2. Directly answer the question in the very first sentence.
+3. Obey the selected English level, length, format, and tone strictly.
+4. DO NOT include the question, question titles, or prompt echoing.
+5. DO NOT include instructions, boilerplate, meta-labels, or preambles (NEVER include 'Question:', 'Answer:', 'Suggested Answer:', 'Instructions:', 'Here is what you should say:', 'To answer your question...', or 'Note:').
+6. Provide concrete technical terms, Big-O complexities, and practical engineering trade-offs where applicable.
 7. LANGUAGE: Respond STRICTLY and EXCLUSIVELY in English. Never output in any other language.`;
 
-  const maxTokens = style === "concise" ? 220 : style === "detailed" ? 480 : 320;
+  const maxTokens = style === "concise" ? 140 : style === "detailed" ? 420 : 250;
   const generationConfig = {
     thinkingConfig: { thinkingBudget: 0 },
     maxOutputTokens: maxTokens,

@@ -90,6 +90,12 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
     if (element && element.scrollHeight - element.scrollTop - element.clientHeight < 160) element.scrollTop = element.scrollHeight;
   }, [state.transcripts]);
 
+  useEffect(() => {
+    if (controller.current && user.preferences) {
+      controller.current.setPreferences(user.preferences);
+    }
+  }, [user.preferences]);
+
   function notify(event: LiveMessage | LocalEvent) {
     if (!mounted.current) return;
     if (event.type === "question") {
@@ -120,6 +126,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
     if (mobile) setCaptureOpen(false);
     try {
       const live = new LiveController(notify, session => { if (mounted.current) onSession(session); });
+      live.setPreferences(user.preferences);
       controller.current = live;
       // Capture permissions remain in Start's user gesture, including on mobile.
       void live.start(mode, title, retention);

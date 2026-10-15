@@ -155,6 +155,11 @@ export function LiveAnswerPreferences({ user, onUser }: { user: User; onUser: (u
     setDraft({ signature, value });
     setSaved(false);
     setAutoState("saving");
+    // Immediately persist to browser storage and notify parent so LiveController has it with 0ms latency
+    try {
+      const stored = updateStoredUser({ preferences: value });
+      onUser(stored);
+    } catch { /* ignore */ }
   }
   // Auto-apply: every dropdown/slider change persists immediately so the next
   // question uses it. No Save click required (fixes "selected parameters not applying").
@@ -164,16 +169,19 @@ export function LiveAnswerPreferences({ user, onUser }: { user: User; onUser: (u
     saveTimer.current = setTimeout(async () => {
       setBusy(true);
       try {
-        const updated = await api<User>("/profile", { method: "PATCH", body: JSON.stringify({ preferences: latest.current }) });
-        onUser(updated); setSaved(true); setAutoState("applied");
-      } catch {
+        const stored = updateStoredUser({ preferences: latest.current });
+        onUser(stored);
         try {
-          const updated = updateStoredUser({ preferences: latest.current });
-          onUser(updated); setSaved(true); setAutoState("applied");
-        } catch (error) { setError(messageOf(error)); setAutoState("idle"); }
+          const updated = await api<User>("/profile", { method: "PATCH", body: JSON.stringify({ preferences: latest.current }) });
+          onUser(updated);
+        } catch { /* LocalStorage is primary */ }
+        setSaved(true); setAutoState("applied");
+      } catch (error) {
+        setError(messageOf(error)); setAutoState("idle");
+      } finally {
+        setBusy(false);
       }
-      finally { setBusy(false); }
-    }, 450);
+    }, 300);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftSignature]);

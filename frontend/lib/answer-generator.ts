@@ -259,52 +259,79 @@ export function synthesizeLocalAnswer(
         `2. Technical Alignment: My experience as a ${role} building resilient systems and managing distributed latency positions me to contribute immediately.\n\n` +
         `3. Long-Term Value: I value high engineering rigor, clear code reviews, and delivering measurable product impact.`;
     } else if (format === "natural") {
-      answerText = `I have followed ${companyName}'s technical leadership closely, and I am especially excited by your scale, high engineering standards, and focus on customer impact. In my work as a ${role}, I prioritize building resilient architectures and shipping reliable systems under load—principles that directly align with how ${companyName} builds software.`;
+      const intro = tone === "friendly" ? "I've been following " : "I have followed ";
+      answerText = `${intro}${companyName}'s technical leadership closely, and I'm especially excited by your engineering standards and focus on customer impact. In my work as a ${role}, I prioritize building resilient architectures and shipping reliable systems under load—principles that directly align with how ${companyName} builds software.`;
     } else {
       answerText = `• Scalable Architecture: Strong technical admiration for ${companyName}'s engineering infrastructure and product velocity.\n\n` +
         `• Proven Experience: Solid background as a ${role} designing resilient systems that solve complex, high-throughput challenges.\n\n` +
         `• Engineering Rigor: Committed to clean code reviews, automated testing, and continuous operational excellence.`;
     }
   } else if (matchedTopic) {
-    let keyPoints = matchedTopic.keyPoints;
-    if (style === "concise") {
-      keyPoints = keyPoints.slice(0, 2);
-    }
+    let keyPoints = [...matchedTopic.keyPoints];
+    let definition = matchedTopic.definition;
+
     if (level === "simple") {
-      keyPoints = keyPoints.map(kp => kp.replace(/amortized|reconciliation|unidirectional|idempotency/gi, "consistent"));
+      definition = definition.replace(/contiguous memory locations/gi, "continuous memory")
+        .replace(/amortized/gi, "average")
+        .replace(/an associative/gi, "a key-value")
+        .replace(/associative/gi, "key-value");
+      keyPoints = keyPoints.map(kp => kp.replace(/amortized|reconciliation|unidirectional|idempotency|spatial locality/gi, "consistent"));
+    }
+
+    if (style === "concise") {
+      keyPoints = format === "natural" ? keyPoints.slice(0, 1) : keyPoints.slice(0, 2);
     }
 
     if (format === "structured") {
-      answerText = `1. ${matchedTopic.definition}\n\n` +
+      answerText = `1. ${definition}\n\n` +
         keyPoints.map((kp, idx) => `${idx + 2}. ${kp}`).join("\n\n") +
         (matchedTopic.tradeoffs && style !== "concise" ? `\n\n${keyPoints.length + 2}. ${matchedTopic.tradeoffs}` : "");
     } else if (format === "natural") {
+      const intro = tone === "friendly"
+        ? "In my experience, "
+        : tone === "casual"
+          ? "The way I look at it, "
+          : "";
+      const lead = intro ? `${intro}${definition.charAt(0).toLowerCase() + definition.slice(1)}` : definition;
       const pointsText = keyPoints.join(" ");
       const tradeoffText = matchedTopic.tradeoffs && style !== "concise" ? ` ${matchedTopic.tradeoffs}` : "";
-      const bestPracticeText = matchedTopic.bestPractices ? ` In production, ${matchedTopic.bestPractices.charAt(0).toLowerCase() + matchedTopic.bestPractices.slice(1)}` : "";
-      answerText = `${matchedTopic.definition} ${pointsText}${tradeoffText}${bestPracticeText}`.trim();
+      const bestPracticeText = matchedTopic.bestPractices && style !== "concise"
+        ? ` In production, ${matchedTopic.bestPractices.charAt(0).toLowerCase() + matchedTopic.bestPractices.slice(1)}`
+        : "";
+      answerText = `${lead} ${pointsText}${tradeoffText}${bestPracticeText}`.trim();
     } else {
       // Default: talking_points
       answerText = [
-        `• ${matchedTopic.definition}`,
+        `• ${definition}`,
         ...keyPoints.map(kp => `• ${kp}`),
         ...(matchedTopic.tradeoffs && style !== "concise" ? [`• ${matchedTopic.tradeoffs}`] : []),
-        ...(matchedTopic.bestPractices ? [`• Practical Application: ${matchedTopic.bestPractices}`] : [])
+        ...(matchedTopic.bestPractices && style !== "concise" ? [`• Practical Application: ${matchedTopic.bestPractices}`] : [])
       ].join("\n\n");
     }
   } else {
     // General question synthesis
     if (format === "structured") {
-      answerText = `1. Clarify Constraints: Identify core requirements, expected inputs, and edge cases before implementing.\n\n` +
-        `2. Architectural Trade-offs: Balance time complexity, memory overhead, and maintainability to pick the right pattern.\n\n` +
-        `3. Production Reliability: Build with thorough automated tests, graceful error handling, and end-to-end observability.`;
+      answerText = style === "concise"
+        ? `1. Clarify Constraints: Identify core requirements and edge cases.\n\n2. Architecture & Delivery: Implement the simplest resilient design with automated test coverage.`
+        : `1. Clarify Constraints: Identify core requirements, expected inputs, and edge cases before implementing.\n\n` +
+          `2. Architectural Trade-offs: Balance time complexity, memory overhead, and maintainability to pick the right pattern.\n\n` +
+          `3. Production Reliability: Build with thorough automated tests, graceful error handling, and end-to-end observability.`;
     } else if (format === "natural") {
-      answerText = `I approach this by first clarifying the system constraints and expected inputs before jumping into implementation. Once the requirements are clear, I evaluate key technical trade-offs—such as time complexity versus memory footprint—and select the simplest, most resilient design. Finally, I validate correctness with comprehensive unit and integration tests and ensure proper observability in production.`;
+      const intro = tone === "friendly"
+        ? "In my experience, I like to "
+        : tone === "casual"
+          ? "Honestly, I usually "
+          : "I approach this by ";
+      answerText = style === "concise"
+        ? `${intro}clarify the core requirements and constraints first, pick the simplest resilient design, and validate it with automated tests.`
+        : `${intro}first clarifying the system constraints and expected inputs before jumping into implementation. Once the requirements are clear, I evaluate key technical trade-offs—such as time complexity versus memory footprint—and select the simplest, most resilient design. Finally, I validate correctness with comprehensive unit and integration tests and ensure proper observability in production.`;
     } else {
       // talking_points
-      answerText = `• Core Requirements: Clarify inputs, performance constraints, and edge cases before implementation.\n\n` +
-        `• Technical Trade-offs: Balance algorithmic time complexity, memory overhead, and architectural simplicity.\n\n` +
-        `• Production Reliability: Ensure automated test coverage, robust error handling, and active monitoring.`;
+      answerText = style === "concise"
+        ? `• Core Requirements: Clarify inputs, performance constraints, and edge cases.\n\n• Resilient Design: Implement the simplest pattern with automated tests and active monitoring.`
+        : `• Core Requirements: Clarify inputs, performance constraints, and edge cases before implementation.\n\n` +
+          `• Technical Trade-offs: Balance algorithmic time complexity, memory overhead, and architectural simplicity.\n\n` +
+          `• Production Reliability: Ensure automated test coverage, robust error handling, and active monitoring.`;
     }
   }
 

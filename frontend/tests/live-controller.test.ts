@@ -7,7 +7,7 @@ vi.mock("../lib/capture", () => ({ AudioCapture: class {
   constructor(mode: string, audio: (packet: ArrayBuffer) => void, ended: (message: string) => void) { doubles.captureStart(mode); doubles.onAudio = audio; doubles.onEnded = ended; this.ready = doubles.ready || Promise.resolve(); }
   stop() { doubles.captureStop(); }
 } }));
-import { LiveController } from "../lib/live-controller";
+import { LiveController, type LocalEvent } from "../lib/live-controller";
 import { ApiError } from "../lib/api";
 import type { LiveMessage } from "../lib/protocol";
 
@@ -241,5 +241,73 @@ describe("English-only speech recognition and clean natural answer synthesis", (
     expect(live.isEnglishSpeech("బైనరీ సెర్చ్ ట్రీ అంటే ఏమిటి?")).toBe(false);
     expect(live.isEnglishSpeech("   ")).toBe(false);
     expect(live.isEnglishSpeech("???!!!")).toBe(false);
+  });
+});
+
+describe("mobile voice buffering (predictable full-phrase capture)", () => {
+  const memoryStorage = () => {
+    const store = new Map<string, string>();
+    return { getItem: (k: string) => (store.has(k) ? store.get(k)! : null), setItem: (k: string, v: string) => { store.set(k, String(v)); }, removeItem: (k: string) => { store.delete(k); }, clear: () => store.clear() };
+  };
+  class FakeRecognition {
+    static instances: FakeRecognition[] = [];
+    continuous = false; interimResults = false; lang = "";
+    onresult: ((event: unknown) => void) | null = null;
+    onerror: ((event: { error?: string }) => void) | null = null;
+    onend: (() => void) | null = null;
+    constructor() { FakeRecognition.instances.push(this); }
+    start() { /* listening */ }
+    stop() { /* stopped */ }
+  }
+  type Chunk = { t: string; final: boolean };
+  const speechEvent = (chunks: Chunk[], resultIndex = 0) => {
+    const results: Record<string | number, unknown> = { length: chunks.length };
+    chunks.forEach((chunk, i) => { results[i] = { 0: { transcript: chunk.t }, isFinal: chunk.final, length: 1 }; });
+    return { resultIndex, results };
+  };
+  const startBrowserMode = async (notify: (event: LiveMessage | LocalEvent) => void) => {
+    FakeRecognition.instances = [];
+    vi.stubGlobal("window", {
+      location: { protocol: "http:", host: "localhost:3001", hostname: "localhost" },
+      localStorage: memoryStorage(),
+      SpeechRecognition: FakeRecognition,
+    });
+    doubles.api.mockImplementation(async (path: string) => {
+      if (path === "/sessions") return { id: "session", status: "created" };
+      if (String(path).endsWith("/ticket")) throw new ApiError("Unavailable", 503);
+      return { id: "session", status: "ended" };
+    });
+    const live = new LiveController(notify, vi.fn());
+    await live.start("microphone", "", false);
+    expect(FakeRecognition.instances).toHaveLength(1);
+    return { live, rec: FakeRecognition.instances[0] };
+  };
+
+  it("keeps continuous listening on (mobile emulated as narrow viewport has no bearing) and stitches split finals into one question", async () => {
+    const notify = vi.fn();
+    const { live, rec } = await startBrowserMode(notify);
+    expect(rec.continuous).toBe(true);
+    // First chunk finalizes early as "what is ".
+    rec.onresult?.(speechEvent([{ t: "what is ", final: true }]));
+    await vi.advanceTimersByTimeAsync(500);
+    // Tail word arrives as the next final chunk in the same window.
+    rec.onresult?.(speechEvent([{ t: "what is ", final: true }, { t: "algorithm", final: true }], 1));
+    await vi.advanceTimersByTimeAsync(1300);
+    const questions = notify.mock.calls.map(([event]) => event).filter(event => event.type === "question");
+    expect(questions).toHaveLength(1);
+    expect(questions[0].question.toLowerCase()).toContain("what is");
+    expect(questions[0].question.toLowerCase()).toContain("algorithm");
+    await live.stop();
+  });
+
+  it("does not drop a lone substantive word as filler", async () => {
+    const notify = vi.fn();
+    const { live, rec } = await startBrowserMode(notify);
+    rec.onresult?.(speechEvent([{ t: "algorithm", final: true }]));
+    await vi.advanceTimersByTimeAsync(1500);
+    const questions = notify.mock.calls.map(([event]) => event).filter(event => event.type === "question");
+    expect(questions).toHaveLength(1);
+    expect(questions[0].question.toLowerCase()).toContain("algorithm");
+    await live.stop();
   });
 });
