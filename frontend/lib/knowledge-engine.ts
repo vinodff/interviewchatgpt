@@ -31,6 +31,24 @@ const TOPICS: KnowledgeTopic[] = [
     ]
   },
   {
+    keywords: ["what is data", "data", "data definition", "types of data", "data in computer science", "data vs information", "define data"],
+    title: "Data in Computer Science",
+    simple: "In computer science, data is raw facts, numbers, or symbols that haven't been processed yet. For example, the number '25' on its own is just raw data. Once we know it means '25 degrees Celsius' or '25 years old', it becomes useful information. In software, we organize data using primitive data types and data structures.",
+    everyday: "In computer science, data refers to raw, unorganized facts, figures, and symbols that are stored, transmitted, or processed by a computer. Data has no inherent meaning until it is structured and processed into information. In programming, we categorize data into primitive types (like integers, floats, characters, and booleans) and composite data structures (like arrays, lists, hash maps, and trees). At a systems level, data is classified as structured (relational SQL tables), semi-structured (JSON, XML), or unstructured (images, audio, logs).",
+    advanced: "In computing, data consists of discrete digital quantities represented as binary bits (0s and 1s) adhering to encoding formats such as UTF-8, IEEE-754, and two's complement. Data undergoes transformations across computational pipelines from raw bitstreams to contextualized information. In software architecture, data modeling determines system performance: primitive types map directly to CPU registers, while composite data structures govern memory allocation, cache locality, and algorithmic time complexity. Enterprise systems manage data lifecycle through serialization protocols (Protobuf, Avro), persistence engines (OLTP vs OLAP), and ACID consistency guarantees.",
+    points: [
+      "**Raw Data vs Information**: Data is raw unorganized facts; information is processed data with context and meaning.",
+      "**Classification**: Structured (relational tables), semi-structured (JSON/XML/Protobuf), and unstructured (media, raw text).",
+      "**Programming Types**: Primitive atomic values (int, float, bool, char) versus composite data structures (lists, dicts, trees, graphs).",
+      "**Machine Representation**: Encoded as binary bits (0s and 1s) conforming to hardware and protocol standards."
+    ],
+    steps: [
+      "1. **Definition**: Unprocessed discrete symbols, values, or facts represented digitally as bits and bytes.",
+      "2. **Pipeline**: Raw Data -> Processing & Parsing -> Structured Information -> Actionable Business Logic.",
+      "3. **Implementation**: Stored in memory using optimized data structures and persisted to relational or NoSQL databases."
+    ]
+  },
+  {
     keywords: ["sequential data type", "sequence type", "sequence types", "sequence data types", "sequential data types in python", "python sequences", "sequential types", "sequence in python"],
     title: "Sequence Types in Python",
     simple: "In Python, sequence types are ordered collections where items can be accessed by an index number starting from 0. The core built-in ones are lists (mutable collections), tuples (immutable collections), strings (text characters), and ranges (used for loops). They all support indexing, slicing, and checking length with len().",

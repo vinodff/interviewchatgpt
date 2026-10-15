@@ -276,5 +276,16 @@ describe("smart utterance deduplication and question cleaning", () => {
     expect(result.answer).toContain("event streaming platform");
     expect(result.answer).toMatch(/recent project/i);
   });
+
+  it("recognizes 'what is data' as an interview question and matches Data in Computer Science topic", () => {
+    expect(isLikelyQuestion("okay what is data", "what is data")).toBe(true);
+    expect(isLikelyQuestion("what is data", "what is data")).toBe(true);
+    expect(isLikelyQuestion("what is date", "what is date")).toBe(true);
+
+    const topic = findMatchingTopic("what is data");
+    expect(topic).not.toBeNull();
+    expect(topic?.title).toBe("Data in Computer Science");
+    expect(topic?.simple).toContain("raw facts");
+  });
 });
 

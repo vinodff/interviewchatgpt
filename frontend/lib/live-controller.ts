@@ -181,13 +181,20 @@ export class LiveController {
 
   private determineRole(text: string): "user" | "interviewer" {
     const clean = text.trim().toLowerCase();
-    if (this.isSelfEcho(text)) return "user";
-    if (/^(my answer is|in my opinion|in my experience|in my work|as i mentioned|i typically|i would say|let me explain|so basically i|i use|i am|i'm|from my background|in my previous project|here is how i)\b/i.test(clean)) {
+
+    // 1. Explicit Candidate Speech Patterns ALWAYS mean candidate (user)
+    if (/^(my answer is|in my opinion|in my experience|in my work|as i mentioned|i typically|i would say|let me explain|so basically i|i use|i am|i'm|from my background|in my previous project|here is how i|my approach is)\b/i.test(clean)) {
       return "user";
     }
+
+    // 2. Clear Question or Interview Prompt ALWAYS means interviewer
     if (isLikelyQuestion(text, cleanQuestion(text))) {
       return "interviewer";
     }
+
+    // 3. Candidate reading displayed answer aloud (self-echo)
+    if (this.isSelfEcho(text)) return "user";
+
     return "interviewer";
   }
 
@@ -439,10 +446,14 @@ export class LiveController {
               clearTimeout(this.speechDebounceTimer);
             }
 
-            // Debounce speech finalization before generating answer (1200ms gives comfortable breathing room)
+            // Smart adaptive debounce:
+            // If the utterance is already a clear question (e.g. "what is data"), finalize in 650ms for lightning-fast answers!
+            // For longer ongoing candidate speech, wait 1100ms.
+            const isQuestion = isLikelyQuestion(this.activeUtterance, cleanQuestion(this.activeUtterance));
+            const debounceMs = isQuestion ? 650 : 1100;
             this.speechDebounceTimer = setTimeout(() => {
               void this.finalizeActiveUtterance();
-            }, 1200);
+            }, debounceMs);
           };
 
           recognition.onerror = (event: any) => {
