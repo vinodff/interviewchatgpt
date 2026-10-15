@@ -16,6 +16,9 @@ export class LiveController {
   private segmentMap = new Map<number, string>();
   private speechBuffer: string[] = [];
   private speechDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private wakeLock: unknown = null;
+  private isRecognizing = false;
   private stopped = false;
   private reconnects = 0;
   private dropped = 0;
@@ -26,10 +29,20 @@ export class LiveController {
 
   async start(mode: AudioMode, title: string, retention: boolean) {
     try {
-      // This constructor invokes browser permissions synchronously before the first await.
-      this.capture = new AudioCapture(mode, packet => this.sendAudio(packet), message => { void this.fail(message); });
-      this.notify({ type: "local", phase: "capturing", detail: "Waiting for your browser’s audio permission…" });
-      await this.capture.ready;
+      const host = typeof window !== "undefined" ? (window.location.hostname || window.location.host || "") : "";
+      const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
+      const isHostedDomain = host !== "" && !isLocal;
+      const isBrowserMode = isHostedDomain && !process.env.NEXT_PUBLIC_WS_URL;
+
+      // When in Browser Live Mode on hosted devices (e.g. Android mobile), do not run AudioCapture
+      // because Android's AudioFlinger only grants exclusive mic access to one audio client at a time.
+      // Skipping AudioCapture gives SpeechRecognition 100% uninterrupted, continuous microphone ownership.
+      if (!isBrowserMode) {
+        this.capture = new AudioCapture(mode, packet => this.sendAudio(packet), message => { void this.fail(message); });
+        this.notify({ type: "local", phase: "capturing", detail: "Waiting for your browser’s audio permission…" });
+        await this.capture.ready;
+      }
+
       if (this.stopped) return;
       this.notify({ type: "local", phase: "connecting", detail: "Connecting your authorized conversation…" });
       const session = await api<Session>("/sessions", post({ consent: true, audio_mode: mode, title: title.trim() || "Live conversation", retention }));
@@ -106,8 +119,19 @@ export class LiveController {
     this.notify({
       type: "status",
       state: "listening",
-      detail: "Live browser assistant active. Listening for questions via your microphone…"
+      detail: "Live audio active. Microphone listening continuously…"
     });
+
+    // Acquire Screen Wake Lock on mobile devices so screen and audio don't sleep
+    if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
+      try {
+        (navigator as unknown as { wakeLock: { request: (type: string) => Promise<unknown> } }).wakeLock.request("screen").then((lock: unknown) => {
+          this.wakeLock = lock;
+        }).catch(() => undefined);
+      } catch {
+        /* ignore */
+      }
+    }
 
     if (typeof window !== "undefined") {
       const SpeechRecognition = (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any }).SpeechRecognition
@@ -119,6 +143,12 @@ export class LiveController {
           recognition.continuous = true;
           recognition.interimResults = true;
           recognition.lang = "en-US";
+          recognition.maxAlternatives = 1;
+
+          recognition.onstart = () => {
+            this.isRecognizing = true;
+          };
+
           recognition.onresult = (event: any) => {
             if (this.stopped) return;
             for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -148,12 +178,37 @@ export class LiveController {
               }
             }
           };
-          recognition.onerror = () => { /* Non-fatal */ };
-          recognition.onend = () => {
-            if (!this.stopped && this.session && this.session.status !== "ended") {
-              try { recognition.start(); } catch { /* ignore */ }
+
+          recognition.onerror = (event: any) => {
+            // 'no-speech' happens naturally when the room is silent; keep listening
+            if (event.error === "no-speech") return;
+
+            // On mobile, if audio-capture or aborted, restart after a brief pause
+            if (event.error === "audio-capture" || event.error === "aborted" || event.error === "network") {
+              if (this.restartTimer) clearTimeout(this.restartTimer);
+              this.restartTimer = setTimeout(() => {
+                if (!this.stopped && !this.isRecognizing && this.session && this.session.status !== "ended") {
+                  try { recognition.start(); } catch { /* ignore */ }
+                }
+              }, 300);
             }
           };
+
+          recognition.onend = () => {
+            this.isRecognizing = false;
+            // On Android Chrome, recognition automatically ends after speech; immediately re-arm without delay
+            if (!this.stopped && this.session && this.session.status !== "ended") {
+              if (this.restartTimer) clearTimeout(this.restartTimer);
+              this.restartTimer = setTimeout(() => {
+                if (!this.stopped && !this.isRecognizing && this.session && this.session.status !== "ended") {
+                  try {
+                    recognition.start();
+                  } catch { /* already running or pending */ }
+                }
+              }, 120);
+            }
+          };
+
           recognition.start();
           this.speechRecognition = recognition;
         } catch { /* SpeechRecognition not allowed */ }
@@ -255,7 +310,7 @@ export class LiveController {
       answerText = result.answer;
     }
 
-    // Fast, natural streaming (20ms cadence)
+    // Fast, natural streaming (22ms cadence)
     const tokens = answerText.split(/(\s+)/);
     let accumulated = "";
 
@@ -325,6 +380,15 @@ export class LiveController {
   async stop(stopRemote = true) {
     if (this.stopped) return;
     this.stopped = true;
+    if (this.wakeLock && typeof (this.wakeLock as { release?: () => Promise<void> }).release === "function") {
+      (this.wakeLock as { release: () => Promise<void> }).release().catch(() => undefined);
+      this.wakeLock = null;
+    }
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+    this.isRecognizing = false;
     if (this.speechDebounceTimer) {
       clearTimeout(this.speechDebounceTimer);
       this.speechDebounceTimer = null;
