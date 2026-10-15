@@ -420,7 +420,7 @@ export class LiveController {
           preferences: prefs,
           evidence
         }),
-        signal: AbortSignal.timeout(3800)
+        signal: AbortSignal.timeout(6500)
       });
       if (response.ok) {
         const data = await response.json();

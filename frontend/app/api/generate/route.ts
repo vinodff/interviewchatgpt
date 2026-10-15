@@ -40,7 +40,7 @@ CRITICAL INSTRUCTIONS:
 8. If Tone is "casual" or "friendly": sound warm, human, and conversational.`;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4500);
+    const timeout = setTimeout(() => controller.abort(), 6000);
 
     const models = ["gemini-3.8-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
     let generatedText = "";
@@ -56,7 +56,7 @@ CRITICAL INSTRUCTIONS:
               contents: [{ parts: [{ text: prompt }] }],
               generationConfig: {
                 temperature: 0.35,
-                maxOutputTokens: length === "concise" ? 280 : length === "detailed" ? 650 : 400
+                maxOutputTokens: 2048
               }
             }),
             signal: controller.signal
