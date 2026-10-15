@@ -105,7 +105,7 @@ dialog.modal { max-width:620px; width:calc(100% - 32px); max-height:calc(100vh -
   .mobile-live .live-desktop-heading { display:none; }
   .mobile-live .live-answer-region { grid-area:auto; grid-row:1; min-height:0; min-width:0; max-height:none; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-gutter:stable; border:0; border-radius:0; background:#fff; padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
   .mobile-live .answer-body { min-height:0; }.mobile-live .answer-label { display:none; }
-  .mobile-live .answer-text { padding:18px 20px 24px; font-size:17px; line-height:1.75; color:#203631; }
+  .mobile-live .answer-text { padding:18px 20px 24px; font-size:var(--answer-font-size,17px); line-height:1.75; color:#203631; }
   .mobile-live .answer-empty { padding:24px 20px; min-height:0; align-items:flex-start; text-align:left; }
   .mobile-live .answer-empty-icon,.mobile-live .answer-empty h3 { display:none; }.mobile-live .answer-empty p { font-size:15px; line-height:1.7; margin:0; color:var(--muted); }
   .mobile-live .live-lower-region { display:flex; flex-direction:column; grid-area:auto; grid-row:2; min-height:0; min-width:0; overflow:hidden; background:var(--paper); border-top:1px solid #cad8ca; }
@@ -135,3 +135,18 @@ dialog.modal { max-width:620px; width:calc(100% - 32px); max-height:calc(100vh -
 }
 @media(max-width:360px) { .mobile-live-brand>svg { display:none; }.mobile-live-brand strong { font-size:12px; }.mobile-live-toolbar nav .button { min-width:44px; } }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
+/* Answer display: adjustable text size, fonts, and easy-read themes (mobile + desktop). */
+.answer-text { font-size:var(--answer-font-size,16px); }
+.answer-text[data-answer-font="serif"] { font-family:Georgia,"Times New Roman",serif; }
+.answer-text[data-answer-font="readable"] { font-family:Verdana,Geneva,Tahoma,sans-serif; letter-spacing:.02em; word-spacing:.06em; line-height:2; }
+.answer-text[data-answer-theme="easy"] { background:#fffbe8; color:#1e2b1f; }
+.answer-text[data-answer-theme="easy"] .reader-current-word { background:#ffe45e; text-decoration:none; border-radius:3px; padding:0 2px; }
+.answer-text[data-answer-theme="contrast"] { background:#0f1f16; color:#f4fff4; }
+.answer-text[data-answer-theme="contrast"] .reader-current-word { background:#ffe45e; color:#0f1f16; text-decoration:none; border-radius:3px; padding:0 2px; }
+.answer-text[data-answer-theme="contrast"] .answer-code-block { background:#1c2f22; color:#eaffea; border-color:#3a5540; }
+.preference-display { display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--line); padding-top:15px; margin-top:2px; }
+.answer-size-control { display:grid; grid-template-columns:1fr auto; font-size:12px; font-weight:600; }
+.answer-size-control output { color:var(--muted); font-weight:400; }
+.answer-size-control input { grid-column:1/-1; width:100%; height:44px; accent-color:var(--teal); }
+.preference-display-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+@media(max-width:760px) { .preference-display-row { grid-template-columns:minmax(0,1fr); } }

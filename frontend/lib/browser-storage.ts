@@ -52,14 +52,17 @@ function defaultUser(): User {
     preferences: {
       role: "Senior Software Engineer",
       language: "English",
-      answer_style: "Structured talking points with key achievements",
+      answer_style: "concise",
       answer_tone: "professional",
       grounding: "balanced",
       english_level: "everyday",
       reading_mode: "auto",
       reading_wpm: 155,
-      response_delivery: "talking_points",
-      personalization: "grounded"
+      response_delivery: "natural",
+      personalization: "grounded",
+      answer_text_size: 17,
+      answer_font: "system",
+      answer_theme: "default"
     },
     minutes_used: 0,
     minute_limit: null, // Unlimited testing minutes
@@ -80,11 +83,44 @@ function defaultProjects(): Project[] {
   ];
 }
 
+export function sanitizePreferences(preferences: Preferences = {}): Preferences {
+  const validDelivery = ["natural", "talking_points", "structured"].includes(preferences.response_delivery || "")
+    ? preferences.response_delivery
+    : "natural";
+  const validLength = ["concise", "balanced", "detailed"].includes(preferences.answer_style || "")
+    ? preferences.answer_style
+    : "concise";
+  const validLevel = ["simple", "everyday", "advanced"].includes(preferences.english_level || "")
+    ? preferences.english_level
+    : "everyday";
+  const validTone = ["professional", "friendly", "casual"].includes(preferences.answer_tone || "")
+    ? preferences.answer_tone
+    : "professional";
+  const size = Number(preferences.answer_text_size);
+  return {
+    ...preferences,
+    response_delivery: validDelivery as Preferences["response_delivery"],
+    answer_style: validLength,
+    english_level: validLevel as Preferences["english_level"],
+    answer_tone: validTone as Preferences["answer_tone"],
+    answer_text_size: Number.isFinite(size) ? Math.min(24, Math.max(14, Math.round(size))) : 17,
+    answer_font: ["system", "serif", "readable"].includes(preferences.answer_font || "") ? preferences.answer_font : "system",
+    answer_theme: ["default", "easy", "contrast"].includes(preferences.answer_theme || "") ? preferences.answer_theme : "default",
+  };
+}
+
 export function getStoredUser(): User {
   const existing = getItem<User | null>(KEY_USER, null);
   if (existing) {
     // Ensure testing mode remains enabled so no account walls ever appear
-    return { ...existing, testing_mode: true, minute_limit: null };
+    // Sanitize legacy stored preferences (invalid answer_style strings, stale defaults).
+    const preferences = sanitizePreferences(existing.preferences || {});
+    const needsRepair = JSON.stringify(preferences) !== JSON.stringify(existing.preferences || {});
+    const repaired = { ...existing, preferences, testing_mode: true, minute_limit: null };
+    if (needsRepair) {
+      try { setItem(KEY_USER, repaired); } catch { /* ignore */ }
+    }
+    return repaired;
   }
   const initial = defaultUser();
   setItem(KEY_USER, initial);

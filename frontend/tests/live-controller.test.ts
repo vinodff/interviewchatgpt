@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const doubles = vi.hoisted(() => ({ api: vi.fn(), captureStart: vi.fn(), captureStop: vi.fn(), onAudio: null as null | ((packet: ArrayBuffer) => void) }));
 vi.mock("../lib/api", async importOriginal => ({ ...await importOriginal<typeof import("../lib/api")>(), api: doubles.api }));
 vi.mock("../lib/capture", () => ({ AudioCapture: class { ready = Promise.resolve(); constructor(_mode: string, audio: (packet: ArrayBuffer) => void) { doubles.captureStart(); doubles.onAudio = audio; } stop() { doubles.captureStop(); } } }));
-import { LiveController } from "../lib/live-controller";
+import { LiveController, mergeUtterances, cleanQuestion } from "../lib/live-controller";
+import { findMatchingTopic } from "../lib/knowledge-engine";
 import { ApiError } from "../lib/api";
 
 class Socket {
@@ -132,3 +133,58 @@ describe("live connection lifecycle", () => {
     expect(Socket.instances).toHaveLength(1); expect(doubles.captureStop).toHaveBeenCalledOnce();
   });
 });
+
+describe("smart utterance deduplication and question cleaning", () => {
+  it("merges progressive speech recognition hypotheses without stuttering", () => {
+    // Exact sequence from User Screenshot 1:
+    let utterance = "";
+    utterance = mergeUtterances(utterance, "ok can you write the");
+    expect(utterance).toBe("ok can you write the");
+
+    utterance = mergeUtterances(utterance, "ok can you write the");
+    expect(utterance).toBe("ok can you write the");
+
+    utterance = mergeUtterances(utterance, "ok can you write the python");
+    expect(utterance).toBe("ok can you write the python");
+
+    utterance = mergeUtterances(utterance, "ok can you write the python code");
+    expect(utterance).toBe("ok can you write the python code");
+
+    utterance = mergeUtterances(utterance, "ok can you write the python code for");
+    expect(utterance).toBe("ok can you write the python code for");
+
+    utterance = mergeUtterances(utterance, "ok can you write the python code for linked list");
+    expect(utterance).toBe("ok can you write the python code for linked list");
+  });
+
+  it("merges restarted and overlapping question fragments without repeating phrases", () => {
+    // Exact sequence from User Screenshot 2:
+    let utterance = "can you";
+    utterance = mergeUtterances(utterance, "so how can you");
+    utterance = mergeUtterances(utterance, "so how can you implement");
+    utterance = mergeUtterances(utterance, "so how can you implement the");
+    utterance = mergeUtterances(utterance, "so how can you implement the");
+    utterance = mergeUtterances(utterance, "so how can you implement the dictionary");
+    utterance = mergeUtterances(utterance, "so how can you implement the dictionary in");
+    utterance = mergeUtterances(utterance, "so how can you implement the dictionary in Python");
+
+    expect(utterance).toBe("so how can you implement the dictionary in Python");
+  });
+
+  it("cleans conversational prefixes and collapses speech stutters", () => {
+    const raw = "okay let me know how can you how can you implement the dictionary in Python";
+    const cleaned = cleanQuestion(raw);
+    expect(cleaned).toBe("how can you implement the dictionary in Python");
+  });
+
+  it("prioritizes linked list topic over generic list vs tuple topic", () => {
+    const topic = findMatchingTopic("ok can you write the python code for linked list");
+    expect(topic).not.toBeNull();
+    expect(topic?.title).toBe("Linked List in Python");
+
+    const dictTopic = findMatchingTopic("so how can you implement the dictionary in Python");
+    expect(dictTopic).not.toBeNull();
+    expect(dictTopic?.title).toBe("Python Dictionary");
+  });
+});
+

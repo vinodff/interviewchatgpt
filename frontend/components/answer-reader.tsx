@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type RefObject } from "react";
 import { advanceReaderClock, createReaderClock, readingWordsPerMinute, type ReaderClockState } from "@/lib/answer-reader";
 import { formatAnswer, formattedAnswerWords, type AnswerSegment } from "@/lib/answer-format";
 import type { Preferences } from "@/lib/types";
@@ -107,5 +107,9 @@ export function AnswerReader({ answer, generation, active, visible, completion, 
     const range = indexedWords.filter(({ word }) => word.start >= segment.start && word.end <= segment.end);
     return <>{range.map(({ word, index }, localIndex) => <Fragment key={word.start}>{answer.slice(range[localIndex - 1]?.word.end ?? segment.start, word.start)}<span data-reader-word={index} data-reader-current={index === position ? "true" : undefined} className={index === position ? "reader-current-word" : undefined}>{answer.slice(word.start, word.end)}</span></Fragment>)}{answer.slice(range.at(-1)?.word.end ?? segment.start, segment.end)}</>;
   }
-  return <div className="answer-text" data-reader-mode={mode} data-reader-position={position} data-reader-status={mode === "off" ? "off" : !enabled ? "paused" : progress.source} data-reader-generation={generation || ""}>{segments.map(segment => segment.kind === "fence" ? <span key={`fence-${segment.start}`} className="answer-code-fence" aria-hidden="true">{answer.slice(segment.start, segment.end)}</span> : segment.kind === "code" ? <pre key={`code-${segment.start}`} className="answer-code-block" data-language={segment.language}><code>{renderRange(segment)}</code></pre> : <Fragment key={`text-${segment.start}`}>{renderRange(segment)}</Fragment>)}</div>;
+  const textSize = Math.min(24, Math.max(14, Math.round(preferences?.answer_text_size ?? 17)));
+  const font = preferences?.answer_font || "system";
+  const theme = preferences?.answer_theme || "default";
+  const displayStyle = { "--answer-font-size": `${textSize}px` } as CSSProperties;
+  return <div className="answer-text" data-reader-mode={mode} data-reader-position={position} data-reader-status={mode === "off" ? "off" : !enabled ? "paused" : progress.source} data-reader-generation={generation || ""} data-answer-font={font} data-answer-theme={theme} style={displayStyle}>{segments.map(segment => segment.kind === "fence" ? <span key={`fence-${segment.start}`} className="answer-code-fence" aria-hidden="true">{answer.slice(segment.start, segment.end)}</span> : segment.kind === "code" ? <pre key={`code-${segment.start}`} className="answer-code-block" data-language={segment.language}><code>{renderRange(segment)}</code></pre> : <Fragment key={`text-${segment.start}`}>{renderRange(segment)}</Fragment>)}</div>;
 }

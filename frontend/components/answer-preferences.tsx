@@ -1,12 +1,12 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Check, ChevronDown, SlidersHorizontal } from "lucide-react";
 import { messageOf } from "@/lib/api";
 import { useOwnedApi } from "@/lib/use-owned-api";
 import type { Preferences, User } from "@/lib/types";
 import { Alert, Button } from "./ui";
 
-function completePreferences(preferences: Preferences = {}): Preferences {
-  return { role: "", language: "English", answer_style: "concise", job_description: "", answer_tone: "professional", grounding: "balanced", english_level: "everyday", reading_mode: "auto", reading_wpm: 130, response_delivery: "natural", personalization: "grounded", ...preferences };
+export function completePreferences(preferences: Preferences = {}): Preferences {
+  return { role: "", language: "English", answer_style: "concise", job_description: "", answer_tone: "professional", grounding: "balanced", english_level: "everyday", reading_mode: "auto", reading_wpm: 130, response_delivery: "natural", personalization: "grounded", answer_text_size: 17, answer_font: "system", answer_theme: "default", ...preferences };
 }
 
 export function AnswerPreferenceFields({ preferences, controlled = false, onChange }: { preferences: Preferences; controlled?: boolean; onChange?: (preferences: Preferences) => void }) {
@@ -14,8 +14,9 @@ export function AnswerPreferenceFields({ preferences, controlled = false, onChan
   const grounding = controlled ? preferences.grounding || "balanced" : draftGrounding;
   const [draftMode, setDraftMode] = useState(preferences.reading_mode || "auto");
   const mode = controlled ? preferences.reading_mode || "auto" : draftMode;
-  function value(key: "answer_tone" | "grounding" | "english_level" | "response_delivery" | "personalization" | "answer_style" | "reading_mode", fallback: string) {
-    return controlled ? { value: preferences[key] || fallback } : { defaultValue: preferences[key] || fallback };
+  const textSize = preferences.answer_text_size ?? 17;
+  function value(key: "answer_tone" | "grounding" | "english_level" | "response_delivery" | "personalization" | "answer_style" | "reading_mode" | "answer_font" | "answer_theme", fallback: string) {
+    return controlled ? { value: (preferences[key] as string) || fallback } : { defaultValue: (preferences[key] as string) || fallback };
   }
   return <div className="answer-preference-fields">
     <div className="preference-primary">
@@ -23,6 +24,14 @@ export function AnswerPreferenceFields({ preferences, controlled = false, onChan
       <label>English level<select name="english_level" {...value("english_level", "everyday")} onChange={event => onChange?.({ ...preferences, english_level: event.target.value as Preferences["english_level"] })}><option value="simple">Simple English</option><option value="everyday">Everyday English</option><option value="advanced">Advanced English</option></select></label>
       <label>Answer length<select name="answer_style" {...value("answer_style", "concise")} onChange={event => onChange?.({ ...preferences, answer_style: event.target.value })}><option value="concise">Short</option><option value="balanced">Balanced</option><option value="detailed">Detailed</option></select></label>
       <label>Hands-free scrolling<select name="reading_mode" {...value("reading_mode", "auto")} onChange={event => { const selected = event.target.value as NonNullable<Preferences["reading_mode"]>; setDraftMode(selected); onChange?.({ ...preferences, reading_mode: selected }); }}><option value="auto">Auto · speech + timed</option><option value="speech">Follow my speech</option><option value="paced">Timed scrolling</option><option value="off">Off</option></select></label>
+    </div>
+    <div className="preference-display">
+      <label className="answer-size-control">Answer text size <output>{textSize}px</output><input aria-label="Answer text size" name="answer_text_size" type="range" min={14} max={24} step={1} value={controlled ? textSize : undefined} defaultValue={controlled ? undefined : textSize} onChange={event => onChange?.({ ...preferences, answer_text_size: Number(event.target.value) })} /></label>
+      <div className="preference-display-row">
+        <label>Reading font<select name="answer_font" {...value("answer_font", "system")} onChange={event => onChange?.({ ...preferences, answer_font: event.target.value as Preferences["answer_font"] })}><option value="system">System · easy to read</option><option value="serif">Serif · calm</option><option value="readable">Readable · wide spacing</option></select></label>
+        <label>Answer theme<select name="answer_theme" {...value("answer_theme", "default")} onChange={event => onChange?.({ ...preferences, answer_theme: event.target.value as Preferences["answer_theme"] })}><option value="default">Default</option><option value="easy">Easy-read · highlighted</option><option value="contrast">High contrast</option></select></label>
+      </div>
+      <p className="preference-help">Text size, font and theme apply instantly on this device, including on mobile. Answer format applies to the next question.</p>
     </div>
     <details className="preference-advanced">
       <summary><SlidersHorizontal size={16} aria-hidden="true" /><span>More options<small>Tone, sources &amp; reading speed</small></span><ChevronDown size={16} aria-hidden="true" /></summary>
@@ -52,23 +61,49 @@ export function LiveAnswerPreferences({ user, onUser }: { user: User; onUser: (u
   const signature = JSON.stringify(currentPreferences);
   const [draft, setDraft] = useState(() => ({ signature, value: currentPreferences }));
   const preferences = draft.signature === signature ? draft.value : currentPreferences;
+  const draftSignature = JSON.stringify(preferences);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
-  function setPreferences(value: Preferences) { setDraft({ signature, value }); }
+  const [autoState, setAutoState] = useState<"idle" | "saving" | "applied">("idle");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latest = useRef(preferences);
+  latest.current = preferences;
+  function setPreferences(value: Preferences) { setDraft({ signature, value }); setSaved(false); }
+  // Auto-apply: every dropdown/slider change persists immediately so the next
+  // question uses it. No Save click required (fixes "selected parameters not applying").
+  useEffect(() => {
+    if (draftSignature === signature) return;
+    setAutoState("saving");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      setBusy(true);
+      try {
+        const updated = await api<User>("/profile", { method: "PATCH", body: JSON.stringify({ preferences: latest.current }) });
+        onUser(updated); setSaved(true); setAutoState("applied");
+      } catch (error) { setError(messageOf(error)); setAutoState("idle"); }
+      finally { setBusy(false); }
+    }, 450);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftSignature]);
   async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError(""); setSaved(false);
+    event.preventDefault();
+    if (draftSignature === signature) { setSaved(true); return; }
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setBusy(true); setError(""); setSaved(false);
     try {
       const updated = await api<User>("/profile", { method: "PATCH", body: JSON.stringify({ preferences }) });
-      onUser(updated); setSaved(true);
+      onUser(updated); setSaved(true); setAutoState("applied");
     } catch (error) { setError(messageOf(error)); } finally { setBusy(false); }
   }
+  const formatLabel = preferences.response_delivery === "natural" ? "Natural answer" : preferences.response_delivery === "talking_points" ? "Talking points" : "Step by step";
   return <form className="form-stack live-preference-form" onSubmit={save}>
     <fieldset disabled={busy} className="preference-fields">
       <AnswerPreferenceFields preferences={preferences} controlled onChange={value => { setPreferences(value); setSaved(false); }} />
     </fieldset>
     {error && <Alert>{error}</Alert>}
     <Button type="submit" variant="secondary" busy={busy}>Save answer preferences <Check size={16} /></Button>
-    <p className="preference-help" role="status">{saved ? "Saved. Answers update next question; scrolling updates now." : "Answers update next question. Scrolling updates when saved."}</p>
+    <p className="preference-help" role="status">{autoState === "saving" ? "Applying… next question will use " + formatLabel + "." : saved || autoState === "applied" ? `Applied ✓ Next question uses ${formatLabel}. Display updates now.` : "Changes apply automatically. Answers update next question. Display updates now."}</p>
   </form>;
 }

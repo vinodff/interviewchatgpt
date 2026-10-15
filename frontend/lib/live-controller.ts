@@ -7,16 +7,87 @@ import { generateHumanAnswer } from "./knowledge-engine";
 
 export type LocalEvent = { type: "local"; phase?: "capturing" | "connecting" | "reconnecting" | "ended"; detail?: string; error?: string; dropped?: number };
 
+export function mergeUtterances(current: string, incoming: string): string {
+  const curr = current.trim();
+  const inc = incoming.trim();
+  if (!curr) return inc;
+  if (!inc) return curr;
+
+  const currLower = curr.toLowerCase();
+  const incLower = inc.toLowerCase();
+
+  // 1. Exact match or incoming is already at the end of current
+  if (currLower === incLower || currLower.endsWith(incLower)) {
+    return curr;
+  }
+
+  // 2. Incoming is a continuation/superset starting with current (e.g. "ok can you write" -> "ok can you write python")
+  if (incLower.startsWith(currLower)) {
+    return inc;
+  }
+
+  // 3. Current starts with incoming (incoming is an older/shorter snapshot)
+  if (currLower.startsWith(incLower)) {
+    return curr;
+  }
+
+  // 4. Incoming contains current anywhere inside it (restarted/extended phrase)
+  if (incLower.includes(currLower)) {
+    return inc;
+  }
+
+  // 5. Overlap between end of curr and start of inc
+  const currWords = curr.split(/\s+/);
+  const incWords = inc.split(/\s+/);
+
+  const maxCheck = Math.min(currWords.length, incWords.length, 8);
+  for (let len = maxCheck; len >= 1; len--) {
+    const currTail = currWords.slice(currWords.length - len).map(w => w.toLowerCase()).join(" ");
+    const incHead = incWords.slice(0, len).map(w => w.toLowerCase()).join(" ");
+    if (currTail === incHead) {
+      const remainingIncWords = incWords.slice(len);
+      return [...currWords, ...remainingIncWords].join(" ");
+    }
+  }
+
+  // 6. If incoming looks like a rephrased longer sentence, take incoming
+  if (incWords.length >= currWords.length + 3) {
+    return inc;
+  }
+
+  return `${curr} ${inc}`;
+}
+
+export function cleanQuestion(fullText: string): string {
+  let q = fullText.trim();
+
+  // 1. Strip conversational filler prefixes
+  q = q
+    .replace(/^(okay|ok|so|now|alright|well|and|um|uh|please)\s*,?\s*/i, "")
+    .replace(/^(let me know|can you tell me|could you tell me|tell me|i want to know|can you explain|could you explain|i want you to)\s*,?\s*/i, "")
+    .replace(/^(your|about|what)\s+(what is|what are)/i, "$2")
+    .trim();
+
+  // 2. Remove consecutive duplicate words or phrases (collapses stutters)
+  for (let pass = 0; pass < 3; pass++) {
+    q = q.replace(/\b(\w+(?:\s+\w+){0,3})\s+\1\b/gi, "$1");
+  }
+
+  return q.trim();
+}
+
 export class LiveController {
   private capture: AudioCapture | null = null;
   private socket: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private speechRecognition: { stop: () => void; start: () => void } | null = null;
-  private segmentMap = new Map<number, string>();
-  private speechBuffer: string[] = [];
+  private activeTranscriptId: string | null = null;
+  private activeUtterance = "";
   private speechDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private visibilityHandler: (() => void) | null = null;
   private wakeLock: unknown = null;
   private isRecognizing = false;
   private stopped = false;
@@ -133,6 +204,25 @@ export class LiveController {
       }
     }
 
+    // Set up visibilitychange handler to recover when phone wakes up or tab returns to view
+    if (typeof document !== "undefined") {
+      this.visibilityHandler = () => {
+        if (!this.stopped && document.visibilityState === "visible" && this.session && this.session.status !== "ended") {
+          if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
+            try {
+              (navigator as unknown as { wakeLock: { request: (type: string) => Promise<unknown> } }).wakeLock.request("screen").then((lock: unknown) => {
+                this.wakeLock = lock;
+              }).catch(() => undefined);
+            } catch { /* ignore */ }
+          }
+          if (this.speechRecognition && !this.isRecognizing) {
+            try { this.speechRecognition.start(); } catch { /* ignore */ }
+          }
+        }
+      };
+      document.addEventListener("visibilitychange", this.visibilityHandler);
+    }
+
     if (typeof window !== "undefined") {
       const SpeechRecognition = (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any }).SpeechRecognition
         || (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition;
@@ -151,46 +241,73 @@ export class LiveController {
 
           recognition.onresult = (event: any) => {
             if (this.stopped) return;
+
+            let currentInterim = "";
+            let currentFinal = "";
+
             for (let i = event.resultIndex; i < event.results.length; i++) {
               const res = event.results[i];
-              const text = res[0]?.transcript?.trim() || "";
-              if (!text) continue;
-
-              // Maintain stable transcript row ID for ongoing utterance
-              let transcriptId = this.segmentMap.get(i);
-              if (!transcriptId) {
-                transcriptId = `tr_${i}_${Date.now()}`;
-                this.segmentMap.set(i, transcriptId);
-              }
-
-              const isFinal = res.isFinal;
-              this.notify({
-                type: "transcript",
-                id: transcriptId,
-                role: "interviewer",
-                text,
-                final: isFinal
-              });
-
-              if (isFinal) {
-                this.segmentMap.delete(i);
-                this.queueUtterance(text);
+              const phrase = res[0]?.transcript?.trim() || "";
+              if (!phrase) continue;
+              if (res.isFinal) {
+                currentFinal = currentFinal ? `${currentFinal} ${phrase}` : phrase;
+              } else {
+                currentInterim = currentInterim ? `${currentInterim} ${phrase}` : phrase;
               }
             }
+
+            const incomingText = (currentFinal || currentInterim).trim();
+            if (!incomingText) return;
+
+            // Ignore conversational filler acknowledgments when idle
+            if (this.isFiller(incomingText) && !this.activeUtterance) {
+              return;
+            }
+
+            if (!this.activeTranscriptId) {
+              this.activeTranscriptId = `tr_${Date.now()}`;
+              this.activeUtterance = incomingText;
+            } else {
+              this.activeUtterance = mergeUtterances(this.activeUtterance, incomingText);
+            }
+
+            // Update the single active transcript turn live in place!
+            this.notify({
+              type: "transcript",
+              id: this.activeTranscriptId,
+              role: "interviewer",
+              text: this.activeUtterance,
+              final: false
+            });
+
+            if (this.speechDebounceTimer) {
+              clearTimeout(this.speechDebounceTimer);
+            }
+
+            // Debounce speech finalization before generating answer
+            this.speechDebounceTimer = setTimeout(() => {
+              void this.finalizeActiveUtterance();
+            }, 950);
           };
 
           recognition.onerror = (event: any) => {
-            // 'no-speech' happens naturally when the room is silent; keep listening
+            // 'no-speech' is normal when room is quiet; keep listening
             if (event.error === "no-speech") return;
 
-            // On mobile, if audio-capture or aborted, restart after a brief pause
+            if (event.error === "not-allowed") {
+              this.isRecognizing = false;
+              return;
+            }
+
+            // For transient errors on mobile (aborted, audio-capture, network), re-arm quickly
             if (event.error === "audio-capture" || event.error === "aborted" || event.error === "network") {
+              this.isRecognizing = false;
               if (this.restartTimer) clearTimeout(this.restartTimer);
               this.restartTimer = setTimeout(() => {
                 if (!this.stopped && !this.isRecognizing && this.session && this.session.status !== "ended") {
                   try { recognition.start(); } catch { /* ignore */ }
                 }
-              }, 300);
+              }, 120);
             }
           };
 
@@ -198,74 +315,85 @@ export class LiveController {
             this.isRecognizing = false;
             // On Android Chrome, recognition automatically ends after speech; immediately re-arm without delay
             if (!this.stopped && this.session && this.session.status !== "ended") {
-              if (this.restartTimer) clearTimeout(this.restartTimer);
-              this.restartTimer = setTimeout(() => {
-                if (!this.stopped && !this.isRecognizing && this.session && this.session.status !== "ended") {
-                  try {
-                    recognition.start();
-                  } catch { /* already running or pending */ }
-                }
-              }, 120);
+              try {
+                recognition.start();
+              } catch {
+                if (this.restartTimer) clearTimeout(this.restartTimer);
+                this.restartTimer = setTimeout(() => {
+                  if (!this.stopped && !this.isRecognizing && this.session && this.session.status !== "ended") {
+                    try { recognition.start(); } catch { /* ignore */ }
+                  }
+                }, 60);
+              }
             }
           };
 
           recognition.start();
           this.speechRecognition = recognition;
+
+          // Watchdog every 1200ms: keeps recognition continuously active even if Android silently dropped it
+          this.watchdogTimer = setInterval(() => {
+            if (!this.stopped && this.session && this.session.status !== "ended" && this.speechRecognition && !this.isRecognizing) {
+              try {
+                this.speechRecognition.start();
+              } catch {
+                /* already starting or active */
+              }
+            }
+          }, 1200);
         } catch { /* SpeechRecognition not allowed */ }
       }
     }
   }
 
-  private queueUtterance(text: string) {
-    const cleaned = text.trim();
-    if (!cleaned) return;
+  private async finalizeActiveUtterance() {
+    if (this.stopped || !this.activeUtterance.trim()) return;
 
-    // Ignore conversational filler acknowledgments
-    if (/^(ok|okay|ok\s+ok|yeah|yep|sure|right|uh\s*huh|mhm|cool|got\s+it)[\s.!,?]*$/i.test(cleaned)) {
-      return;
+    const raw = this.activeUtterance.trim();
+    const transcriptId = this.activeTranscriptId;
+
+    // Mark current turn as finalized in the transcript UI
+    if (transcriptId) {
+      this.notify({
+        type: "transcript",
+        id: transcriptId,
+        role: "interviewer",
+        text: raw,
+        final: true
+      });
     }
 
-    this.speechBuffer.push(cleaned);
+    // Reset utterance tracking so next question gets its own turn
+    this.activeTranscriptId = null;
+    this.activeUtterance = "";
 
-    if (this.speechDebounceTimer) {
-      clearTimeout(this.speechDebounceTimer);
-    }
+    if (this.isFiller(raw)) return;
 
-    // Debounce to allow user to complete multi-part speech naturally
-    this.speechDebounceTimer = setTimeout(() => {
-      void this.processSpeechBuffer();
-    }, 850);
-  }
+    const clean = cleanQuestion(raw);
+    if (clean.length < 5) return;
 
-  private async processSpeechBuffer() {
-    if (this.stopped || !this.speechBuffer.length) return;
-    const fullText = this.speechBuffer.join(" ").trim();
-    this.speechBuffer = [];
-
-    // Filter filler prefixes like "okay let me know what is", "can you tell me"
-    let question = fullText
-      .replace(/^(okay|ok|so|now|alright|well|and|um|uh|please)\s*,?\s*/i, "")
-      .replace(/^(let me know|can you tell me|could you tell me|tell me|i want to know|can you explain|could you explain)\s*,?\s*/i, "")
-      .replace(/^(your|about|what)\s+(what is|what are)/i, "$2")
-      .trim();
-
-    if (question.length < 5) return;
-
-    const isQuestion = fullText.includes("?")
-      || /^(what|how|why|when|where|which|who|can|could|would|is|are|do|does|did|explain|describe|tell|walk me through|difference)/i.test(fullText)
-      || /^(what|how|why|when|where|which|who|can|could|would|is|are|do|does|did|explain|describe|tell|walk me through|difference)/i.test(question)
-      || /(python|javascript|react|database|dataset|dictionary|sql|api|system|service|memory|class|function|design|scale|code|git|docker)/i.test(question);
+    const isQuestion = raw.includes("?")
+      || /^(what|how|why|when|where|which|who|can|could|would|is|are|do|does|did|explain|describe|tell|walk me through|difference)/i.test(raw)
+      || /^(what|how|why|when|where|which|who|can|could|would|is|are|do|does|did|explain|describe|tell|walk me through|difference)/i.test(clean)
+      || /(python|javascript|react|database|dataset|dictionary|sql|api|system|service|memory|class|function|design|scale|code|git|docker|linked list|hash map|queue|stack|tree|array)/i.test(clean);
 
     if (isQuestion) {
-      await this.respondToQuestion(question, fullText);
+      await this.respondToQuestion(clean, raw);
     }
+  }
+
+  private isFiller(text: string): boolean {
+    const cleaned = text.trim().toLowerCase().replace(/[^a-z0-9\s]/g, "");
+    if (!cleaned) return true;
+    return /^(ok|okay|ok\s+ok|okay\s+okay|yeah|yep|yes|sure|right|uh\s*huh|mhm|cool|got\s+it|alright|thanks|thank\s+you|hello|hi|hey|am\s+i\s+audible|can\s+you\s+hear\s+me|testing)+$/i.test(cleaned);
   }
 
   async respondToQuestion(question: string, rawUtterance?: string) {
     if (this.stopped) return;
     const genId = `gen_${Date.now()}`;
     const displayQuestion = question.length > 5 ? question : (rawUtterance || question);
-    const words = displayQuestion.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 3).slice(0, 5);
+    const rawWords = displayQuestion.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 3);
+    const words = Array.from(new Set(rawWords)).slice(0, 5);
 
     this.notify({
       type: "question",
@@ -393,8 +521,16 @@ export class LiveController {
       clearTimeout(this.speechDebounceTimer);
       this.speechDebounceTimer = null;
     }
-    this.speechBuffer = [];
-    this.segmentMap.clear();
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+    if (this.visibilityHandler && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
+    this.activeTranscriptId = null;
+    this.activeUtterance = "";
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.heartbeat) clearInterval(this.heartbeat);
     if (this.speechRecognition) {

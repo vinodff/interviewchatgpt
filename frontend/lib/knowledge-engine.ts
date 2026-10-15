@@ -48,6 +48,24 @@ const TOPICS: KnowledgeTopic[] = [
     ]
   },
   {
+    keywords: ["linked list", "linkedlist", "singly linked list", "doubly linked list", "node next", "python linked list"],
+    title: "Linked List in Python",
+    simple: "A linked list is a chain of nodes where each node contains data and a pointer to the next node. Unlike a standard list where items sit next to each other in memory, linked list nodes can be anywhere in memory, connected like train cars.",
+    everyday: "A linked list is a linear data structure where elements (nodes) contain data and a reference (pointer) to the next node. It allows O(1) insertions and deletions at the head, though searching requires O(N) linear traversal. In Python, you implement it using a `Node` class with `self.next` and a `LinkedList` class to track the head.",
+    advanced: "A linked list is a non-contiguous sequential data structure. Singly linked lists maintain a head pointer with unidirectional node references, while doubly linked lists maintain both `prev` and `next` pointers. While Python dynamic arrays (`list`) offer contiguous cache locality and O(1) random indexing, linked lists provide O(1) splices and dequeues without buffer reallocation.",
+    points: [
+      "**Node Structure**: Each node contains a `data` attribute and a `next` pointer referencing the subsequent node.",
+      "**Time Complexity**: O(1) insertion/deletion at head; O(N) lookup and arbitrary index access.",
+      "**Memory Overhead**: Extra memory per node for pointer references; non-contiguous memory access reduces CPU cache locality.",
+      "**Python Implementation**: Defined using a `Node(data)` class and a `LinkedList` wrapper managing `head`."
+    ],
+    steps: [
+      "1. **Define Node**: Create a `Node` class with `self.data = data` and `self.next = None`.",
+      "2. **Manage Head**: In `LinkedList`, initialize `self.head = None` and traverse using `curr = curr.next`.",
+      "3. **Traversal & Edge Cases**: Always handle empty list (`head is None`) and single-node edge cases when traversing or deleting."
+    ]
+  },
+  {
     keywords: ["list", "tuple", "list vs tuple", "python list", "python tuple"],
     title: "Lists vs Tuples in Python",
     simple: "In Python, a list is like a shopping list you can change, add items to, or erase (`[1, 2, 3]`). A tuple is like a birth certificate—once created with parentheses `(1, 2, 3)`, it is permanent and cannot be modified. Because tuples can't change, they are slightly faster and use less memory.",
@@ -196,20 +214,90 @@ const TOPICS: KnowledgeTopic[] = [
 export function findMatchingTopic(question: string): KnowledgeTopic | null {
   const q = question.toLowerCase();
   let bestTopic: KnowledgeTopic | null = null;
-  let maxMatches = 0;
+  let maxScore = 0;
 
   for (const topic of TOPICS) {
-    let matches = 0;
+    let score = 0;
     for (const kw of topic.keywords) {
-      if (q.includes(kw)) matches += kw.split(" ").length;
+      if (kw.includes(" ")) {
+        if (q.includes(kw)) score += kw.split(" ").length * 5;
+      } else {
+        const regex = new RegExp(`\\b${kw}\\b`, "i");
+        if (regex.test(q)) {
+          // If the keyword is "list" and the query specifies "linked list", do not match generic list
+          if (kw === "list" && q.includes("linked list")) continue;
+          score += 2;
+        }
+      }
     }
-    if (matches > maxMatches) {
-      maxMatches = matches;
+    if (score > maxScore) {
+      maxScore = score;
       bestTopic = topic;
     }
   }
 
-  return maxMatches > 0 ? bestTopic : null;
+  return maxScore > 0 ? bestTopic : null;
+}
+
+export function isCodeRequest(question: string): boolean {
+  const q = question.toLowerCase();
+  if (/(write|show|give|implement|create|generate|draft).{0,30}(code|function|method|program|script|implementation)/i.test(q)) return true;
+  if (/^(code|python code|write code|show code|give me.*code)/i.test(q.trim())) return true;
+  if (/write.*python/i.test(q) || /python.*(code|function|program|script)/i.test(q)) return true;
+  if (/(implement|define).{0,30}(function|class|dict|dictionary|list)/i.test(q)) return true;
+  return false;
+}
+
+function codeLanguage(question: string): string {
+  const q = question.toLowerCase();
+  if (/\bjavascript\b|\btypescript\b|\bjs\b/.test(q)) return "javascript";
+  if (/\bsql\b/.test(q)) return "sql";
+  if (/\bjava\b/.test(q)) return "java";
+  return "python";
+}
+
+function codeExample(question: string, language: string): string {
+  const q = question.toLowerCase();
+  if (language === "python") {
+    if (/linked ?list|node.*next/.test(q)) {
+      return `class Node:\n    def __init__(self, data):\n        self.data = data\n        self.next = None\n\nclass LinkedList:\n    def __init__(self):\n        self.head = None\n\n    def append(self, data):\n        new_node = Node(data)\n        if not self.head:\n            self.head = new_node\n            return\n        curr = self.head\n        while curr.next:\n            curr = curr.next\n        curr.next = new_node\n\n    def display(self):\n        curr = self.head\n        while curr:\n            print(curr.data, end=" -> ")\n            curr = curr.next\n        print("None")\n\n# Usage:\nll = LinkedList()\nll.append(10)\nll.append(20)\nll.display()  # 10 -> 20 -> None`;
+    }
+    if (/implement.*(dict|dictionary|hash ?map)|how.*(dict|dictionary).*implemented/.test(q)) {
+      return `class SimpleHashMap:\n    """Basic hash table implementation demonstrating open addressing / chaining."""\n    def __init__(self, size=16):\n        self.size = size\n        self.buckets = [[] for _ in range(size)]\n\n    def _hash(self, key):\n        return hash(key) % self.size\n\n    def set(self, key, value):\n        idx = self._hash(key)\n        for i, (k, v) in enumerate(self.buckets[idx]):\n            if k == key:\n                self.buckets[idx][i] = (key, value)\n                return\n        self.buckets[idx].append((key, value))\n\n    def get(self, key, default=None):\n        idx = self._hash(key)\n        for k, v in self.buckets[idx]:\n            if k == key:\n                return v\n        return default\n\n# Usage:\nd = SimpleHashMap()\nd.set("python", 3.12)\nprint(d.get("python"))  # 3.12`;
+    }
+    if (/dict|key.?value|hash ?map/.test(q)) {
+      return `user_scores = {"ana": 92, "ben": 85}\nuser_scores["cara"] = 90\n\naverage = sum(user_scores.values()) / len(user_scores)\nprint(f"Average: {average:.1f}")\nprint(user_scores.get("dan", "not found"))`;
+    }
+    if (/list|tuple/.test(q)) {
+      return `items = [3, 1, 2]\nitems.append(4)\ncoords = (10, 20)\n\nfor item in sorted(items):\n    print(item)\nprint(f"Point: {coords[0]}, {coords[1]}")`;
+    }
+    if (/dataset|dataframe|pandas|csv/.test(q)) {
+      return `import pandas as pd\n\ndf = pd.read_csv("data.csv")\ndf = df.dropna()\nprint(df.head())\nprint(df.describe())`;
+    }
+    if (/async|await|event loop/.test(q)) {
+      return `import asyncio\nimport httpx\n\nasync def fetch_titles(urls: list[str]) -> list[str]:\n    async with httpx.AsyncClient() as client:\n        results = []\n        for url in urls:\n            response = await client.get(url)\n            results.append(response.text[:100])\n        return results`;
+    }
+    if (/api|rest|http|flask|fastapi/.test(q)) {
+      return `from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get("/users/{user_id}")\ndef get_user(user_id: int):\n    return {"user_id": user_id, "name": "Ana"}`;
+    }
+    // Generic fallback: exact runnable Python, no paragraph wrapper.
+    return `def solve(items: list[int]) -> list[int]:\n    seen: dict[int, int] = {}\n    result: list[int] = []\n    for item in items:\n        if item not in seen:\n            seen[item] = 1\n            result.append(item)\n    return result\n\n\nif __name__ == "__main__":\n    print(solve([3, 1, 2, 1, 3]))`;
+  }
+  if (language === "sql") {
+    return `SELECT department, AVG(salary) AS avg_salary\nFROM employees\nWHERE active = TRUE\nGROUP BY department\nORDER BY avg_salary DESC;`;
+  }
+  if (language === "javascript") {
+    return `function unique(items) {\n  return [...new Set(items)];\n}\n\nconsole.log(unique([3, 1, 2, 1, 3]));`;
+  }
+  return `public class Main {\n  public static void main(String[] args) {\n    System.out.println("Hello");\n  }\n}`;
+}
+
+function stripPointers(text: string): string {
+  // Natural voice must never contain bullet pointers, numbered steps, or bold markers.
+  return text
+    .replace(/^[\s•\-\*]+\s*/gm, "")
+    .replace(/^\d+[.)]\s+/gm, "")
+    .replace(/\*\*/g, "");
 }
 
 export function generateHumanAnswer(
@@ -218,13 +306,29 @@ export function generateHumanAnswer(
   preferences: Preferences = {},
   evidence: Evidence[] = []
 ): { answer: string; keywords: string[] } {
-  const delivery = preferences.response_delivery || "natural";
+  const rawDelivery = preferences.response_delivery || "natural";
   const level = preferences.english_level || "everyday";
-  const length = preferences.answer_style || "concise";
+  const length = ["concise", "balanced", "detailed"].includes(preferences.answer_style || "") ? preferences.answer_style! : "concise";
   const tone = preferences.answer_tone || "professional";
+  // Code requests always win over delivery format: show exact code, not a paragraph.
+  const codeIntent = isCodeRequest(question);
+  const delivery = codeIntent ? "code" : rawDelivery;
 
   const topic = findMatchingTopic(question);
   const qWords = question.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 3).slice(0, 5);
+
+  // Exact code surface: fenced block first so the reader renders it as code.
+  if (delivery === "code") {
+    const language = codeLanguage(question);
+    const snippet = codeExample(question, language);
+    const vague = question.trim().split(/\s+/).length <= 4;
+    const note = length === "concise"
+      ? (vague ? "Here is a clean starting point. Tell me the exact task and I will tailor it." : "Here is how I would write it.")
+      : (vague ? "Here is a clean starting point I use. Tell me the exact inputs and edge cases and I will tailor it." : "Here is how I would write it in my own work.");
+    const plainNote = stripPointers(note);
+    const answer = `\`\`\`${language}\n${snippet}\n\`\`\`\n${plainNote}`;
+    return { answer, keywords: qWords };
+  }
 
   // If we matched a technical topic
   if (topic) {
@@ -246,17 +350,26 @@ export function generateHumanAnswer(
       return { answer, keywords: qWords };
     }
 
-    // Natural conversational delivery
+    // Natural conversational delivery: first-person spoken voice, no pointers.
+    // This must never contain • - * bullets, numbered steps, headers, or ** bold.
     let coreText = level === "simple" ? topic.simple : level === "advanced" ? topic.advanced : topic.everyday;
     if (length === "concise") {
       // Pick the first 2 concise sentences
       const sentences = coreText.split(/(?<=[.?!])\s+/);
       coreText = sentences.slice(0, 2).join(" ");
     } else if (length === "detailed") {
-      coreText += "\n\nIn my day-to-day engineering work, understanding these nuances is essential for writing clean, performant code and preventing memory or runtime bottlenecks.";
+      coreText += " In my day-to-day work I use this to keep code clean and fast and to avoid runtime issues.";
+    }
+    // Voice: speak as "I" so the candidate can say it naturally.
+    let voiceText = coreText
+      .replace(/^In Python,\s*a dictionary is\b/i, "I use a Python dictionary when I need")
+      .replace(/^In Python,\s*/i, "In my work I ")
+      .replace(/^A (REST API|database index|database)/i, "I treat a $1");
+    if (!/\bI\b/.test(voiceText.slice(0, 60))) {
+      voiceText = (tone === "casual" ? "In my work, " : "In my work as a " + role + ", ") + voiceText.charAt(0).toLowerCase() + voiceText.slice(1);
     }
 
-    const answer = `${opener}${coreText}`;
+    const answer = stripPointers(`${opener}${voiceText}`);
     return { answer, keywords: qWords };
   }
 
