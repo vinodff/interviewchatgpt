@@ -30,6 +30,24 @@ const TOPICS: KnowledgeTopic[] = [
     ]
   },
   {
+    keywords: ["sequential data type", "sequence type", "sequence types", "sequence data types", "sequential data types in python", "python sequences", "sequential types", "sequence in python"],
+    title: "Sequence Types in Python",
+    simple: "In Python, sequence types are ordered collections where items can be accessed by an index number starting from 0. The core built-in ones are lists (mutable collections), tuples (immutable collections), strings (text characters), and ranges (used for loops). They all support indexing, slicing, and checking length with len().",
+    everyday: "In Python, sequence types represent ordered collections of items that support index-based access and slicing. The core built-in sequence types are `list` (mutable dynamic array), `tuple` (immutable sequence), `str` (immutable Unicode text), and `range` (memory-efficient integer arithmetic sequence). All sequences share standard operations: `len()`, indexing (`s[i]`), negative indexing (`s[-1]`), slicing (`s[start:stop:step]`), concatenation (`+`), and membership testing (`in`).",
+    advanced: "In Python, sequence types conform to the `Sequence` and `Reversible` abstract base classes in `collections.abc`, implementing `__getitem__` and `__len__`. They are categorized as mutable (`list`, `bytearray`) or immutable (`tuple`, `str`, `bytes`, `range`). Slicing utilizes slice objects (`slice(start, stop, step)`) executing in C-level pointer manipulation. Sequences provide contiguous cache locality, O(1) random access by index, and O(N) linear scans for membership, in contrast to associative mappings (dictionaries/sets) that rely on hash tables.",
+    points: [
+      "**Core Types**: Built-in sequence types include `list` (mutable), `tuple` (immutable), `str` (character sequence), and `range` (arithmetic sequence).",
+      "**Common Operations**: All sequences support indexing (`s[0]`), negative indexing (`s[-1]`), slicing (`s[1:4]`), `len()`, and iteration.",
+      "**Mutability Distinction**: Lists allow in-place item assignment and appending; tuples, strings, and ranges are immutable.",
+      "**Performance**: Indexing is O(1) constant time; searching/membership with `in` is O(N) linear time."
+    ],
+    steps: [
+      "1. **Definition**: An ordered collection supporting index-based access starting at 0 and slicing via `s[start:stop:step]`.",
+      "2. **Key Varieties**: Mutable (`list`, `bytearray`) for dynamic data; immutable (`tuple`, `str`, `range`) for fixed integrity and hashable dictionary keys.",
+      "3. **Standard Methods**: Leverage `.index()`, `.count()`, concatenation with `+`, and unpacking (`a, b = s`)."
+    ]
+  },
+  {
     keywords: ["dictionary", "dict", "key value", "hash map", "hashmap", "python dictionary"],
     title: "Python Dictionary",
     simple: "In Python, a dictionary is like a real-world dictionary where you look up a word to find its meaning. It stores data as key-value pairs using curly braces. It is super fast because you don't have to search through a list—you just ask for the key and immediately get the value.",

@@ -194,12 +194,17 @@ describe("smart utterance deduplication and question cleaning", () => {
     expect(isLikelyQuestion("what is the difference between list and tuple", "what is the difference between list and tuple")).toBe(true);
     expect(isLikelyQuestion("write code for palindrome", "write code for palindrome")).toBe(true);
     expect(isLikelyQuestion("palindrome in python", "palindrome in python")).toBe(true);
+    expect(isLikelyQuestion("sequential data type in Python", "sequential data type in Python")).toBe(true);
+    expect(isLikelyQuestion("the sequential data type in Python", "the sequential data type in Python")).toBe(true);
+    expect(isLikelyQuestion("tell me about python", "tell me about python")).toBe(true);
+    expect(isLikelyQuestion("okay nice Vinod now tell me about python", "okay nice Vinod now tell me about python")).toBe(true);
 
     // Candidate reading aloud / explaining - MUST BE REJECTED to prevent overwriting answers!
     expect(isLikelyQuestion("In Python, a dictionary is like a real-world dictionary", "In Python a dictionary is like a real-world dictionary")).toBe(false);
     expect(isLikelyQuestion("I use a Python dictionary when I need O(1) lookups", "I use a Python dictionary when I need O(1) lookups")).toBe(false);
     expect(isLikelyQuestion("We can clean the string and check if it equals its reverse slice", "We can clean the string and check if it equals its reverse slice")).toBe(false);
     expect(isLikelyQuestion("Basically, for example here is how I would explain it", "Basically for example here is how I would explain it")).toBe(false);
+    expect(isLikelyQuestion("my answer is very simple in Python sequential types are the Ordered and collection", "my answer is very simple in Python sequential types are the Ordered and collection")).toBe(false);
   });
 
   it("generates simple, clean, explainable palindrome code with clean == clean[::-1]", () => {
@@ -212,11 +217,20 @@ describe("smart utterance deduplication and question cleaning", () => {
     expect(result.answer).toContain("def is_palindrome");
   });
 
-  it("matches the Palindrome topic in the knowledge engine", () => {
+  it("matches the Palindrome and Sequence Types topics in the knowledge engine", () => {
     const topic = findMatchingTopic("can you explain palindrome in python");
     expect(topic).not.toBeNull();
     expect(topic?.title).toBe("Palindrome in Python");
     expect(topic?.simple).toContain("clean == clean[::-1]");
+
+    const seqTopic = findMatchingTopic("what is the sequential data type in Python");
+    expect(seqTopic).not.toBeNull();
+    expect(seqTopic?.title).toBe("Sequence Types in Python");
+    expect(seqTopic?.simple).toContain("sequence types are ordered collections");
+
+    const directSeqTopic = findMatchingTopic("sequential data type in Python");
+    expect(directSeqTopic).not.toBeNull();
+    expect(directSeqTopic?.title).toBe("Sequence Types in Python");
   });
 });
 

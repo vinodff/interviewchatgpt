@@ -79,48 +79,49 @@ export function cleanQuestion(fullText: string): string {
 export function isLikelyQuestion(raw: string, clean: string): boolean {
   const r = raw.trim();
   const c = clean.trim();
-  if (c.length < 5) return false;
+  if (c.length < 4) return false;
 
-  // 1. Definite negative: candidate speaking or reading explanations
-  // If the sentence starts with first-person statements or explanatory preambles without a question mark, reject it
-  if (/^(i\s|i'm|in my|in python|for example|basically|first|next|then|here|my|as a|so if|when we|it is|it has|this is|they are|we can|you can)\b/i.test(c)) {
-    if (!r.endsWith("?")) return false;
-  }
-
-  // 2. Direct question mark
+  // 1. Definite question mark
   if (r.endsWith("?") || c.endsWith("?")) return true;
 
-  // 3. Question interrogatives (e.g. "what", "how", "why", "when", "where", "which", "who")
-  if (/^(what|how|why|when|where|which|who|whom|whose)\b/i.test(r) || /^(what|how|why|when|where|which|who|whom|whose)\b/i.test(c)) {
+  // 2. Explicit question interrogatives (e.g. "what", "how", "why", "when", "where", "which", "who")
+  const hasInterrogative = /^(what|how|why|when|where|which|who|whom|whose)\b/i.test(r) ||
+    /^(what|how|why|when|where|which|who|whom|whose)\b/i.test(c) ||
+    /\b(what is|what are|how to|how do|how does|how can|why is|why does|which one)\b/i.test(c);
+  if (hasInterrogative) return true;
+
+  // 3. Modal / auxiliary interview questions (e.g. "can you", "could you", "would you")
+  const hasModal = /\b(can you|could you|would you|will you|should you)\b/i.test(c);
+  if (hasModal) return true;
+
+  // 4. Inverted auxiliary verbs (e.g. "is there", "are there", "do you", "does it", "have you", "did you")
+  const hasInvertedAux = /^(is|are|do|does|did|have|has|was|were)\s+(you|we|there|it|a|an|the|this|that|they)\b/i.test(r) ||
+    /^(is|are|do|does|did|have|has|was|were)\s+(you|we|there|it|a|an|the|this|that|they)\b/i.test(c);
+  if (hasInvertedAux) return true;
+
+  // 5. Direct request / imperative to explain, describe, tell, compare
+  const hasImperative = /^(explain|describe|tell me|talk about|what about|how about|walk me through|clarify|elaborate|give me|compare|difference between)\b/i.test(r) ||
+    /^(explain|describe|tell me|talk about|what about|how about|walk me through|clarify|elaborate|give me|compare|difference between)\b/i.test(c);
+  if (hasImperative) return true;
+
+  // 6. Direct coding prompts (e.g. "write code for...", "implement...", "give me python code for...")
+  const hasCodePrompt = /\b(write|show|give|implement|create|code|draft)\s+(a|an|the|me|us|some)?\s*(code|program|function|script|algorithm|class|method|solution|linked list|palindrome|two sum|hash map)\b/i.test(c);
+  if (hasCodePrompt) return true;
+
+  // 7. Explanatory statements / candidate reading: if it starts with first-person, descriptive definitions ("In Python a dictionary is..."), reject it!
+  const isExplanation = /^(i\s|i'm|in my|in python\s+[a-z\s]+(is|are)\b|for example|basically|first|next|then|here|my\s|as a|so if|when we|it is|it has|this is|they are|we can|you can|user_scores|items\s*=)\b/i.test(c);
+  if (isExplanation) return false;
+
+  // 8. Core technical interview concepts & topics (e.g. "sequential data type in Python", "sequence types in python", "linked list in Python")
+  // In an interview, naming a technical topic or concept is a prompt for the candidate to explain it.
+  const technicalTopics = /(sequential\s+data\s+type|sequence\s+type|sequence\s+types|data\s+type|linked\s+list|hash\s+map|dictionary|list\s+vs\s+tuple|palindrome|two\s+sum|binary\s+search|sorting\s+algorithm|recursion|gil\b|global\s+interpreter\s+lock|multithreading|concurrency|asyncio|generator|iterator|decorator|rest\s+api|fastapi|django|docker|kubernetes|sql\b|database\s+index|memory\s+management)/i;
+  if (technicalTopics.test(c)) {
     return true;
   }
 
-  // 4. Modal / auxiliary interview questions (e.g. "can you", "could you", "would you")
-  if (/^(can you|could you|would you|will you|should you)\b/i.test(r) || /^(can you|could you|would you|will you|should you)\b/i.test(c)) {
-    return true;
-  }
-
-  // 5. Inverted auxiliary verbs (e.g. "is there", "are there", "do you", "does it", "have you", "did you")
-  if (/^(is|are|do|does|did|have|has|was|were)\s+(you|we|there|it|a|an|the|this|that|they)\b/i.test(r) ||
-      /^(is|are|do|does|did|have|has|was|were)\s+(you|we|there|it|a|an|the|this|that|they)\b/i.test(c)) {
-    return true;
-  }
-
-  // 6. Direct request / imperative to explain, describe, solve
-  if (/^(explain|describe|tell me|walk me through|clarify|elaborate|give me an example)\b/i.test(r) ||
-      /^(explain|describe|tell me|walk me through|clarify|elaborate|give me an example)\b/i.test(c)) {
-    return true;
-  }
-
-  // 7. Direct coding prompts (e.g. "write code for...", "implement...", "give me python code for...")
-  if (/^(write|show|give|implement|create|code|draft)\s+(a|an|the|me|us|some)?\s*(code|program|function|script|algorithm|class|method|solution|linked list|palindrome|two sum|hash map)\b/i.test(r) ||
-      /^(write|show|give|implement|create|code|draft)\s+(a|an|the|me|us|some)?\s*(code|program|function|script|algorithm|class|method|solution|linked list|palindrome|two sum|hash map)\b/i.test(c)) {
-    return true;
-  }
-
-  // 8. Short technical coding topic prompts (under 7 words)
+  // 9. Short prompt mentioning python / javascript / react / sql along with technical keywords (under 8 words)
   const words = c.split(/\s+/);
-  if (words.length <= 7 && /(palindrome|linked list|two sum|binary search|hash map|reverse string|fibonacci)/i.test(c)) {
+  if (words.length <= 8 && /(python|javascript|react|sql|database|api|code|algorithm|memory|class|function)/i.test(c)) {
     return true;
   }
 
@@ -132,7 +133,7 @@ export class LiveController {
   private socket: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
-  private speechRecognition: { stop: () => void; start: () => void } | null = null;
+  private speechRecognition: { stop: () => void; start: () => void; abort?: () => void } | null = null;
   private activeTranscriptId: string | null = null;
   private activeUtterance = "";
   private speechDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -153,11 +154,34 @@ export class LiveController {
   private isGeneratingAnswer = false;
   /** When true, locks the currently displayed answer from being replaced by new speech */
   private isAnswerLocked = false;
+  /** Permanent microphone hardware keep-alive stream & context to prevent Android from cycling mic */
+  private keepAliveStream: MediaStream | null = null;
+  private keepAliveContext: AudioContext | null = null;
+  /** Session start time for millisecond-level elapsed timestamp tracking */
+  private startedAt = 0;
+  /** Tracks the last finalized turn for smart cross-pause utterance stitching */
+  private lastFinalizedTurn: { text: string; at: number; id: string } | null = null;
 
   constructor(private notify: (event: LiveMessage | LocalEvent) => void, private onSession: (session: Session) => void) {}
 
   setAnswerLocked(locked: boolean) {
     this.isAnswerLocked = locked;
+  }
+
+  private getElapsedTimestamp(): string {
+    const elapsedSec = Math.max(0, Math.floor((Date.now() - (this.startedAt || Date.now())) / 1000));
+    const mm = Math.floor(elapsedSec / 60).toString().padStart(2, "0");
+    const ss = (elapsedSec % 60).toString().padStart(2, "0");
+    return `${mm}:${ss}`;
+  }
+
+  private determineRole(text: string): "user" | "interviewer" {
+    const clean = text.trim().toLowerCase();
+    if (this.isSelfEcho(text)) return "user";
+    if (/^(my answer is|in my opinion|in my experience|in my work|as i mentioned|i typically|i would say|let me explain|so basically i|i use|i am|i'm|from my background|in my previous project|here is how i)\b/i.test(clean)) {
+      return "user";
+    }
+    return "interviewer";
   }
 
   async start(mode: AudioMode, title: string, retention: boolean) {
@@ -249,13 +273,14 @@ export class LiveController {
 
   private startBrowserLiveMode() {
     if (this.stopped) return;
+    this.startedAt = Date.now();
     this.notify({
       type: "status",
       state: "listening",
-      detail: "Live audio active. Microphone listening continuously…"
+      detail: "Live audio active. Microphone recording continuously…"
     });
 
-    // Acquire Screen Wake Lock on mobile devices so screen and audio don't sleep
+    // 1. Acquire Screen Wake Lock on mobile devices so screen and audio don't sleep
     if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
       try {
         (navigator as unknown as { wakeLock: { request: (type: string) => Promise<unknown> } }).wakeLock.request("screen").then((lock: unknown) => {
@@ -266,7 +291,44 @@ export class LiveController {
       }
     }
 
-    // Set up visibilitychange handler to recover when phone wakes up or tab returns to view
+    // 2. Continuous Hardware Microphone Keep-Alive (like a phone call)
+    // On mobile Android Chrome (e.g. Realme P-2 Pro), holding a background MediaStream connected to a
+    // silent AudioContext keeps the OS AudioFlinger hardware channel permanently open.
+    // This prevents Android from repeatedly closing/re-opening the mic hardware on speech pauses,
+    // eliminating status bar mic blinking and avoiding lost words.
+    if (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      }).then(stream => {
+        if (this.stopped) {
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+        this.keepAliveStream = stream;
+        try {
+          const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+          if (AudioContextClass) {
+            const ctx = new AudioContextClass();
+            const source = ctx.createMediaStreamSource(stream);
+            const silent = ctx.createGain();
+            silent.gain.value = 0; // completely silent
+            source.connect(silent);
+            silent.connect(ctx.destination);
+            this.keepAliveContext = ctx;
+            if (ctx.state === "suspended") {
+              void ctx.resume().catch(() => undefined);
+            }
+          }
+        } catch { /* AudioContext fallback */ }
+      }).catch(() => { /* user denied or unsupported; speechRecognition will still run */ });
+    }
+
+    // 3. Set up visibilitychange handler to recover when phone wakes up or tab returns to view
     if (typeof document !== "undefined") {
       this.visibilityHandler = () => {
         if (!this.stopped && document.visibilityState === "visible" && this.session && this.session.status !== "ended") {
@@ -326,19 +388,41 @@ export class LiveController {
               return;
             }
 
+            const now = Date.now();
             if (!this.activeTranscriptId) {
-              this.activeTranscriptId = `tr_${Date.now()}`;
-              this.activeUtterance = incomingText;
+              // Smart cross-pause stitching:
+              // Check if incoming text is a continuation or repetition of the previously finalized turn
+              const canStitch = this.lastFinalizedTurn
+                && (now - this.lastFinalizedTurn.at < 6000)
+                && (
+                  // Incomplete prompt ending: e.g. "tell me about", "what about", "how about", "explain", "is"
+                  /(tell me about|what about|how about|explain|describe|what is|what are|the|in|about|of|for|and|with)$/i.test(this.lastFinalizedTurn.text.trim())
+                  // Or repetition / expansion: e.g. "sequential data type in Python"
+                  || incomingText.toLowerCase().includes(this.lastFinalizedTurn.text.toLowerCase())
+                  || this.lastFinalizedTurn.text.toLowerCase().includes(incomingText.toLowerCase())
+                );
+
+              if (canStitch && this.lastFinalizedTurn) {
+                this.activeTranscriptId = this.lastFinalizedTurn.id;
+                this.activeUtterance = mergeUtterances(this.lastFinalizedTurn.text, incomingText);
+              } else {
+                this.activeTranscriptId = `tr_${now}`;
+                this.activeUtterance = incomingText;
+              }
             } else {
               this.activeUtterance = mergeUtterances(this.activeUtterance, incomingText);
             }
 
-            // Update the single active transcript turn live in place!
+            const role = this.determineRole(this.activeUtterance);
+            const timestamp = this.getElapsedTimestamp();
+
+            // Update the single active transcript turn live in place with exact timestamp!
             this.notify({
               type: "transcript",
               id: this.activeTranscriptId,
-              role: "interviewer",
+              role,
               text: this.activeUtterance,
+              timestamp,
               final: false
             });
 
@@ -346,10 +430,10 @@ export class LiveController {
               clearTimeout(this.speechDebounceTimer);
             }
 
-            // Debounce speech finalization before generating answer
+            // Debounce speech finalization before generating answer (1200ms gives comfortable breathing room)
             this.speechDebounceTimer = setTimeout(() => {
               void this.finalizeActiveUtterance();
-            }, 950);
+            }, 1200);
           };
 
           recognition.onerror = (event: any) => {
@@ -361,7 +445,7 @@ export class LiveController {
               return;
             }
 
-            // For transient errors on mobile (aborted, audio-capture, network), re-arm quickly
+            // For transient errors on mobile (aborted, audio-capture, network), re-arm rapidly (35ms)
             if (event.error === "audio-capture" || event.error === "aborted" || event.error === "network") {
               this.isRecognizing = false;
               if (this.restartTimer) clearTimeout(this.restartTimer);
@@ -369,7 +453,7 @@ export class LiveController {
                 if (!this.stopped && !this.isRecognizing && this.session && this.session.status !== "ended") {
                   try { recognition.start(); } catch { /* ignore */ }
                 }
-              }, 120);
+              }, 35);
             }
           };
 
@@ -385,7 +469,7 @@ export class LiveController {
                   if (!this.stopped && !this.isRecognizing && this.session && this.session.status !== "ended") {
                     try { recognition.start(); } catch { /* ignore */ }
                   }
-                }, 60);
+                }, 25);
               }
             }
           };
@@ -393,7 +477,7 @@ export class LiveController {
           recognition.start();
           this.speechRecognition = recognition;
 
-          // Watchdog every 1200ms: keeps recognition continuously active even if Android silently dropped it
+          // Watchdog every 1000ms: keeps recognition continuously active even if Android silently dropped it
           this.watchdogTimer = setInterval(() => {
             if (!this.stopped && this.session && this.session.status !== "ended" && this.speechRecognition && !this.isRecognizing) {
               try {
@@ -402,7 +486,7 @@ export class LiveController {
                 /* already starting or active */
               }
             }
-          }, 1200);
+          }, 1000);
         } catch { /* SpeechRecognition not allowed */ }
       }
     }
@@ -451,26 +535,35 @@ export class LiveController {
 
     const raw = this.activeUtterance.trim();
     const transcriptId = this.activeTranscriptId;
+    const role = this.determineRole(raw);
+    const timestamp = this.getElapsedTimestamp();
 
-    // Mark current turn as finalized in the transcript UI
+    // Mark current turn as finalized in the transcript UI with exact timestamp & accurate role
     if (transcriptId) {
       this.notify({
         type: "transcript",
         id: transcriptId,
-        role: "interviewer",
+        role,
         text: raw,
+        timestamp,
         final: true
       });
     }
+
+    // Save for smart cross-pause utterance stitching
+    this.lastFinalizedTurn = { text: raw, at: Date.now(), id: transcriptId || `tr_${Date.now()}` };
 
     // Reset utterance tracking so next question gets its own turn
     this.activeTranscriptId = null;
     this.activeUtterance = "";
 
+    // Candidate speech should not trigger new answers
+    if (role === "user") return;
+
     if (this.isFiller(raw)) return;
 
     const clean = cleanQuestion(raw);
-    if (clean.length < 5) return;
+    if (clean.length < 4) return;
 
     // === SMART ANTI-OVERWRITE SAFEGUARDS ===
 
@@ -636,6 +729,15 @@ export class LiveController {
   async stop(stopRemote = true) {
     if (this.stopped) return;
     this.stopped = true;
+    if (this.keepAliveStream) {
+      this.keepAliveStream.getTracks().forEach(track => track.stop());
+      this.keepAliveStream = null;
+    }
+    if (this.keepAliveContext) {
+      try { void this.keepAliveContext.close(); } catch { /* ignore */ }
+      this.keepAliveContext = null;
+    }
+    this.lastFinalizedTurn = null;
     if (this.wakeLock && typeof (this.wakeLock as { release?: () => Promise<void> }).release === "function") {
       (this.wakeLock as { release: () => Promise<void> }).release().catch(() => undefined);
       this.wakeLock = null;

@@ -1,6 +1,6 @@
 import type { Evidence } from "./types";
 
-export type Transcript = { id: string; role: "interviewer" | "user" | "unknown"; text: string; final: boolean };
+export type Transcript = { id: string; role: "interviewer" | "user" | "unknown"; text: string; final: boolean; timestamp?: string };
 export type LiveMessage =
   | { type: "status"; state: "connecting" | "listening" | "reconnecting" | "ended"; detail?: string }
   | ({ type: "transcript" } & Transcript)

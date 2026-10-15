@@ -8,5 +8,5 @@ export type Project = { id: string; name: string; description: string; analysis:
 export type Source = { id: string; project_id: string | null; name: string; kind: string; status: "queued" | "processing" | "ready" | "failed"; error: string | null; chunk_count: number; created_at: string };
 export type Evidence = { id: string; source_id: string; project_id: string | null; source_name: string; text: string; score: number; locator: string; verified_contribution: boolean; retrieval_mode?: string; retrieval_warning?: string };
 export type Session = { id: string; title: string; status: "created" | "live" | "ended"; audio_mode: "microphone" | "tab"; retention: boolean; created_at: string; ended_at: string | null; summary: string; metrics: Record<string, number>; turns?: Turn[] };
-export type Turn = { id: string; role: "interviewer" | "user" | "unknown"; text: string; question?: string; answer?: string; evidence?: Evidence[]; created_at: string };
+export type Turn = { id: string; role: "interviewer" | "user" | "unknown"; text: string; question?: string; answer?: string; evidence?: Evidence[]; created_at: string; timestamp?: string };
 export type Health = { status: string; database: string; redis: string; ai_configured: boolean; billing_configured: boolean };
