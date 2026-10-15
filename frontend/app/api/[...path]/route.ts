@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { synthesizeLocalAnswer } from "@/lib/answer-generator";
+import { isCodeQuestion, synthesizeLocalAnswer } from "@/lib/answer-generator";
 import type { Evidence, Preferences } from "@/lib/types";
 
 function cleanAnswerText(raw: string, question: string): string {
@@ -18,8 +18,10 @@ function cleanAnswerText(raw: string, question: string): string {
     cleaned = cleaned.replace(qRegex, "").trim();
   }
 
-  // Strip trailing notes or instructions
-  cleaned = cleaned.replace(/\n+(?:note|instructions?)\s*:\s*.*$/is, "").trim();
+  // Strip trailing notes or instructions (only outside code blocks)
+  if (!cleaned.includes("```")) {
+    cleaned = cleaned.replace(/\n+(?:note|instructions?)\s*:\s*.*$/is, "").trim();
+  }
 
   return cleaned;
 }
@@ -80,7 +82,35 @@ async function generateAnswerWithGemini(
       ? "Tone: Relaxed, colloquial spoken phrasing ('Honestly, the way I look at this is...'). Authentic and relatable."
       : "Tone: Confident, direct, and professional engineering tone.";
 
-  const prompt = `You are an expert real-time AI interview co-pilot helping a candidate during a live interview.
+  const isCode = isCodeQuestion(question);
+  let prompt: string;
+  let maxTokens = style === "concise" ? 140 : style === "detailed" ? 420 : 250;
+
+  if (isCode) {
+    maxTokens = 500;
+    const introLead = tone === "friendly"
+      ? "In my experience, here is a clean and straightforward way to implement this in Python:"
+      : tone === "casual"
+        ? "Here is a clean, simple way to write this in Python:"
+        : "Here is the clean implementation using an optimal approach in Python:";
+
+    prompt = `You are an expert real-time AI interview co-pilot helping a candidate during a live technical coding interview.
+The interviewer asked the candidate to WRITE CODE for: "${question}".
+
+Candidate Role: ${role}
+Selected Tone: ${tone}
+English Level: ${level === "simple" ? "Simple plain English explanations and comments." : "Everyday natural engineering English."}
+
+CRITICAL CODING INSTRUCTIONS:
+1. SHIFT DIRECTLY TO DISPLAYING THE EXACT, WORKING CODE. Do NOT output long paragraphs of text.
+2. Provide the exact working code in a clean markdown code block (\`\`\`python, \`\`\`javascript, or the appropriate requested language).
+3. Keep the code simple, optimal, and readable. Don't over-complicate or over-engineer.
+4. Precede the code with a short, natural 1-sentence spoken intro matching the selected parameters (e.g. "${introLead}").
+5. Follow the code with 1 short spoken sentence mentioning the time and space complexity (e.g. "This runs in O(n) time and O(1) auxiliary space.").
+6. DO NOT include meta-labels like "Question:", "Answer:", "Suggested Answer:", or "Instructions:".
+7. Respond strictly in English.`;
+  } else {
+    prompt = `You are an expert real-time AI interview co-pilot helping a candidate during a live interview.
 Provide an immediate, exact, and direct answer to the interviewer's question.
 
 Question: "${question}"
@@ -99,13 +129,17 @@ CRITICAL SPOKEN DELIVERY RULES:
 4. DO NOT include the question, question titles, or prompt echoing.
 5. DO NOT include instructions, boilerplate, meta-labels, or preambles (NEVER include 'Question:', 'Answer:', 'Suggested Answer:', 'Instructions:', 'Here is what you should say:', 'To answer your question...', or 'Note:').
 6. Provide concrete technical terms, Big-O complexities, and practical engineering trade-offs where applicable.
-7. LANGUAGE: Respond STRICTLY and EXCLUSIVELY in English. Never output in any other language.`;
+7. LANGUAGE: Respond STRICTLY and EXCLUSIVELY in English. Never output in any other language.
+8. HUMAN VOICE: Sound like a person thinking aloud, not an article. Vary sentence length (short punches mixed with longer explanations), use contractions matching the requested tone, and NEVER use rigid transitions like 'Firstly/Secondly', 'Moreover', 'Furthermore', or 'In conclusion'. No essay structure — just say it the way you'd say it.`;
+  }
 
-  const maxTokens = style === "concise" ? 140 : style === "detailed" ? 420 : 250;
   const generationConfig = {
     thinkingConfig: { thinkingBudget: 0 },
     maxOutputTokens: maxTokens,
-    temperature: 0.2
+    // Human-like voice needs sampling room: low temperatures sound
+    // deterministic and textbook-like. 0.7 keeps facts stable while
+    // varying rhythm, phrasing and sentence length like a real speaker.
+    temperature: isCode ? 0.2 : 0.7
   };
 
   const models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"];

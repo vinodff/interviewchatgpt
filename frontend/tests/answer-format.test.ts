@@ -75,8 +75,75 @@ describe("safe fenced answer formatting", () => {
     expect(res.answer.startsWith("Here is how I address")).toBe(false);
     expect(res.answer.startsWith("When approaching")).toBe(false);
 
-    // Must start directly with the concept explanation
+    // Human spoken voice: starts capitalized, first-person, real substance
     expect(res.answer).toMatch(/^[A-Z]/);
-    expect(res.answer).toContain("list is an ordered");
+    expect(res.answer).toContain("ordered");
+    expect(res.answer).toMatch(/\bI\b/);
+    // Simple English explains Big-O in plain words
+    expect(res.answer).toContain("instant no matter the size");
+  });
+
+  it("lets tone audibly reshape the same answer", async () => {
+    const { synthesizeLocalAnswer } = await import("@/lib/answer-generator");
+    const professional = synthesizeLocalAnswer("What is a hashmap?", { response_delivery: "natural", answer_tone: "professional" }).answer;
+    const casual = synthesizeLocalAnswer("What is a hashmap?", { response_delivery: "natural", answer_tone: "casual" }).answer;
+    const friendly = synthesizeLocalAnswer("What is a hashmap?", { response_delivery: "natural", answer_tone: "friendly" }).answer;
+    expect(professional).not.toBe(casual);
+    expect(casual).toMatch(/^Honestly,/);
+    expect(friendly).toMatch(/^Yeah, so /);
+    expect(professional).toMatch(/^Sure/);
+  });
+
+  it("lets length and level reshape the same answer", async () => {
+    const { synthesizeLocalAnswer } = await import("@/lib/answer-generator");
+    const concise = synthesizeLocalAnswer("Explain REST.", { response_delivery: "natural", answer_style: "concise" }).answer;
+    const detailed = synthesizeLocalAnswer("Explain REST.", { response_delivery: "natural", answer_style: "detailed" }).answer;
+    expect(detailed.split(/\s+/).length).toBeGreaterThan(concise.split(/\s+/).length + 20);
+    const simple = synthesizeLocalAnswer("What is a list?", { response_delivery: "natural", english_level: "simple" }).answer;
+    const everyday = synthesizeLocalAnswer("What is a list?", { response_delivery: "natural", english_level: "everyday" }).answer;
+    expect(simple).toContain("instant no matter the size");
+    expect(everyday).not.toContain("instant no matter the size");
+    expect(everyday).toContain("O(1)");
+  });
+
+  it("weaves candidate sources only when personalization is grounded", async () => {
+    const { synthesizeLocalAnswer } = await import("@/lib/answer-generator");
+    const evidence = [{ id: "e1", source_id: "s1", project_id: null, source_name: "Payments API", text: "Built a Redis-backed queue for payment retries", score: 1, locator: "cv:1", verified_contribution: true }];
+    const grounded = synthesizeLocalAnswer("How do queues work?", { response_delivery: "natural", answer_style: "balanced", personalization: "grounded" }, evidence).answer;
+    const technical = synthesizeLocalAnswer("How do queues work?", { response_delivery: "natural", answer_style: "balanced", personalization: "technical" }, evidence).answer;
+    expect(grounded).toContain("Payments API");
+    expect(technical).not.toContain("Payments API");
+  });
+
+  it("keeps talking_points and structured distinct from natural flow", async () => {
+    const { synthesizeLocalAnswer } = await import("@/lib/answer-generator");
+    const natural = synthesizeLocalAnswer("What is a stack?", { response_delivery: "natural" }).answer;
+    const points = synthesizeLocalAnswer("What is a stack?", { response_delivery: "talking_points" }).answer;
+    const steps = synthesizeLocalAnswer("What is a stack?", { response_delivery: "structured" }).answer;
+    expect(natural).not.toContain("•");
+    expect(natural).not.toMatch(/^\d+\./m);
+    expect(points).toContain("•");
+    expect(steps).toMatch(/^1\. /m);
+  });
+
+  it("shifts directly to displaying exact code when interviewer asks to write code", async () => {
+    const { isCodeQuestion, synthesizeLocalAnswer } = await import("@/lib/answer-generator");
+    expect(isCodeQuestion("Write the code for binary search")).toBe(true);
+    expect(isCodeQuestion("write code for a hash map")).toBe(true);
+    expect(isCodeQuestion("can you code an algorithm to reverse a linked list?")).toBe(true);
+    expect(isCodeQuestion("implement a stack in python")).toBe(true);
+    expect(isCodeQuestion("show me the code for debounce")).toBe(true);
+    expect(isCodeQuestion("What is a hashmap?")).toBe(false);
+
+    const bsearch = synthesizeLocalAnswer("Write the code for binary search", { answer_tone: "friendly" }).answer;
+    expect(bsearch).toContain("```python");
+    expect(bsearch).toContain("def binary_search");
+    expect(bsearch).toContain("while left <= right:");
+    expect(bsearch).toMatch(/straightforward way to implement/i);
+
+    const hashmap = synthesizeLocalAnswer("write the code for a hash map", { answer_tone: "professional" }).answer;
+    expect(hashmap).toContain("```python");
+    expect(hashmap).toContain("class SimpleHashMap");
+    expect(hashmap).toContain("def put(");
   });
 });
