@@ -58,6 +58,84 @@ export function mergeUtterances(current: string, incoming: string): string {
   return `${curr} ${inc}`;
 }
 
+/** Normalized comparison form: lowercase, no punctuation, single spaces. */
+function normText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Fuzzy duplicate-question check. Growing ASR repeats are never exactly equal,
+ * so exact comparison misses them. True when one normalized question contains
+ * the other (covers superstring repeats in both directions) or token overlap
+ * is very high (covers lightly rephrased repeats).
+ */
+export function isDuplicateQuestion(a: string, b: string): boolean {
+  const na = normText(a);
+  const nb = normText(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const [shorter, longer] = na.length <= nb.length ? [na, nb] : [nb, na];
+  // Containment needs a meaningful anchor so tiny phrases cannot match everything.
+  if (shorter.length >= 12 && longer.includes(shorter)) return true;
+  const setA = new Set(na.split(" "));
+  const setB = new Set(nb.split(" "));
+  let inter = 0;
+  setA.forEach(word => { if (setB.has(word)) inter++; });
+  return inter / (setA.size + setB.size - inter) >= 0.8;
+}
+
+/**
+ * Collapse immediately repeated multi-word runs ("...tags here ...tags here")
+ * that streaming ASR emits inside one long turn. cleanQuestion only handles
+ * runs up to 4 words; recognition restarts echo much longer runs.
+ */
+export function dedupeRepeatedPhrases(text: string): string {
+  const tokens = text.split(/(\s+)/);
+  const words: string[] = [];
+  const gaps: string[] = [];
+  tokens.forEach((token, index) => { (index % 2 === 0 ? words : gaps).push(token); });
+  const keyOf = (word: string) => word.toLowerCase().replace(/[^a-z0-9]/g, "");
+  for (let pass = 0; pass < 5; pass++) {
+    let changed = false;
+    for (let i = 0; i < words.length; i++) {
+      // No run-length cap: recognition restarts echo whole sentences (50+ words).
+      const maxRun = Math.floor((words.length - i) / 2);
+      for (let run = maxRun; run >= 1; run--) {
+        let same = true;
+        for (let k = 0; k < run; k++) {
+          if (keyOf(words[i + k]) !== keyOf(words[i + run + k]) || !keyOf(words[i + k])) { same = false; break; }
+        }
+        if (same) {
+          words.splice(i + run, run);
+          gaps.splice(i + run, run);
+          changed = true;
+          break;
+        }
+      }
+      if (changed) break;
+    }
+    if (!changed) break;
+  }
+  return words.map((word, index) => word + (gaps[index] || "")).join("").trim();
+}
+
+/**
+ * Classify new speech against the last finalized turn, reusing the proven
+ * mergeUtterances overlap logic:
+ * - "repeat": fully covered by prior text (echo / older snapshot) → ignore.
+ * - "continuation": extends or overlaps prior text → resume the same row.
+ * - "new": unrelated → start a fresh row.
+ */
+export function repetitionOf(incoming: string, prior: string): "repeat" | "continuation" | "new" {
+  const inc = incoming.trim();
+  const prev = prior.trim();
+  if (!inc || !prev) return "new";
+  const merged = mergeUtterances(prev, inc);
+  if (merged.toLowerCase() === prev.toLowerCase()) return "repeat";
+  if (merged !== `${prev} ${inc}`) return "continuation";
+  return "new";
+}
+
 export function cleanQuestion(fullText: string): string {
   let q = fullText.trim();
 
@@ -154,15 +232,16 @@ export class LiveController {
   private isGeneratingAnswer = false;
   /** When true, locks the currently displayed answer from being replaced by new speech */
   private isAnswerLocked = false;
-  /** Permanent microphone hardware keep-alive stream & context to prevent Android from cycling mic */
-  private keepAliveStream: MediaStream | null = null;
-  private keepAliveContext: AudioContext | null = null;
+  /** True while speech recognition is in the middle of starting asynchronously */
+  private isStarting = false;
   /** Session start time for millisecond-level elapsed timestamp tracking */
   private startedAt = 0;
   /** Text already finalized by previous recognition instances in the active turn */
   private turnCommittedText = "";
-  /** Last processed question to prevent identical duplicate processing within 4s */
+  /** Last accepted question, guarded by a fuzzy duplicate window */
   private lastProcessedQuestion = "";
+  /** When the last question was accepted, for the fuzzy duplicate window */
+  private lastQuestionAt = 0;
   /** Tracks the last finalized turn for smart cross-pause utterance stitching */
   private lastFinalizedTurn: { text: string; at: number; id: string; role: "user" | "interviewer" } | null = null;
 
@@ -187,13 +266,17 @@ export class LiveController {
       return "user";
     }
 
-    // 2. Clear Question or Interview Prompt ALWAYS means interviewer
+    // 2. Candidate reading the displayed answer aloud (self-echo) is checked
+    // BEFORE question patterns: answer-reading in a mixed microphone carries
+    // topic keywords ("dictionary", "tags") that question heuristics would
+    // otherwise match, wiping the answer the candidate is reading. Real
+    // questions are safe — isSelfEcho excludes interrogative-led utterances.
+    if (this.isSelfEcho(text)) return "user";
+
+    // 3. Clear Question or Interview Prompt ALWAYS means interviewer
     if (isLikelyQuestion(text, cleanQuestion(text))) {
       return "interviewer";
     }
-
-    // 3. Candidate reading displayed answer aloud (self-echo)
-    if (this.isSelfEcho(text)) return "user";
 
     return "interviewer";
   }
@@ -205,10 +288,21 @@ export class LiveController {
       const isHostedDomain = host !== "" && !isLocal;
       const isBrowserMode = isHostedDomain && !process.env.NEXT_PUBLIC_WS_URL;
 
-      // When in Browser Live Mode on hosted devices (e.g. Android mobile), do not run AudioCapture
-      // because Android's AudioFlinger only grants exclusive mic access to one audio client at a time.
-      // Skipping AudioCapture gives SpeechRecognition 100% uninterrupted, continuous microphone ownership.
-      if (!isBrowserMode) {
+      if (isBrowserMode) {
+        // In Browser Live Mode on mobile/hosted devices, request mic permission upfront if supported
+        // and immediately release tracks so the hardware mic is 100% free and unblocked for SpeechRecognition!
+        if (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop());
+          } catch (err) {
+            if ((err as Error)?.name === "NotAllowedError" || (err as Error)?.name === "PermissionDeniedError") {
+              await this.fail("Microphone permission was denied. Please allow microphone access in your browser settings to continue.", false);
+              return;
+            }
+          }
+        }
+      } else {
         this.capture = new AudioCapture(mode, packet => this.sendAudio(packet), message => { void this.fail(message); });
         this.notify({ type: "local", phase: "capturing", detail: "Waiting for your browser’s audio permission…" });
         await this.capture.ready;
@@ -295,231 +389,236 @@ export class LiveController {
     });
 
     // 1. Acquire Screen Wake Lock on mobile devices so screen and audio don't sleep
-    if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
-      try {
-        (navigator as unknown as { wakeLock: { request: (type: string) => Promise<unknown> } }).wakeLock.request("screen").then((lock: unknown) => {
-          this.wakeLock = lock;
-        }).catch(() => undefined);
-      } catch {
-        /* ignore */
-      }
-    }
+    this.acquireWakeLock();
 
-    // 2. Continuous Hardware Microphone Keep-Alive (like a phone call)
-    // On mobile Android Chrome (e.g. Realme P-2 Pro), holding a background MediaStream connected to a
-    // silent AudioContext keeps the OS AudioFlinger hardware channel permanently open.
-    // This prevents Android from repeatedly closing/re-opening the mic hardware on speech pauses,
-    // eliminating status bar mic blinking and avoiding lost words.
-    if (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      }).then(stream => {
-        if (this.stopped) {
-          stream.getTracks().forEach(t => t.stop());
-          return;
-        }
-        this.keepAliveStream = stream;
-        try {
-          const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-          if (AudioContextClass) {
-            const ctx = new AudioContextClass();
-            const source = ctx.createMediaStreamSource(stream);
-            const silent = ctx.createGain();
-            silent.gain.value = 0; // completely silent
-            source.connect(silent);
-            silent.connect(ctx.destination);
-            this.keepAliveContext = ctx;
-            if (ctx.state === "suspended") {
-              void ctx.resume().catch(() => undefined);
-            }
-          }
-        } catch { /* AudioContext fallback */ }
-      }).catch(() => { /* user denied or unsupported; speechRecognition will still run */ });
-    }
-
-    // 3. Set up visibilitychange handler to recover when phone wakes up or tab returns to view
+    // 2. Set up visibilitychange handler to recover when phone wakes up or tab returns to view
     if (typeof document !== "undefined") {
       this.visibilityHandler = () => {
         if (!this.stopped && document.visibilityState === "visible" && this.session && this.session.status !== "ended") {
-          if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
-            try {
-              (navigator as unknown as { wakeLock: { request: (type: string) => Promise<unknown> } }).wakeLock.request("screen").then((lock: unknown) => {
-                this.wakeLock = lock;
-              }).catch(() => undefined);
-            } catch { /* ignore */ }
-          }
-          if (this.speechRecognition && !this.isRecognizing) {
-            try { this.speechRecognition.start(); } catch { /* ignore */ }
+          this.acquireWakeLock();
+          if (!this.isRecognizing && !this.isStarting) {
+            this.scheduleRecognitionRestart(80);
           }
         }
       };
       document.addEventListener("visibilitychange", this.visibilityHandler);
     }
 
-    if (typeof window !== "undefined") {
-      const SpeechRecognition = (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any }).SpeechRecognition
-        || (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition;
+    // 3. Initialize continuous SpeechRecognition (exclusive hardware mic access)
+    this.initSpeechRecognition();
 
-      if (SpeechRecognition) {
-        try {
-          const recognition = new SpeechRecognition();
-          recognition.continuous = true;
-          recognition.interimResults = true;
-          recognition.lang = "en-US";
-          recognition.maxAlternatives = 1;
-
-          recognition.onstart = () => {
-            this.isRecognizing = true;
-          };
-
-          recognition.onresult = (event: any) => {
-            if (this.stopped) return;
-
-            let sessionFinal = "";
-            let sessionInterim = "";
-
-            for (let i = 0; i < event.results.length; i++) {
-              const res = event.results[i];
-              const phrase = res[0]?.transcript?.trim() || "";
-              if (!phrase) continue;
-              if (res.isFinal) {
-                sessionFinal = sessionFinal ? `${sessionFinal} ${phrase}` : phrase;
-              } else {
-                sessionInterim = sessionInterim ? `${sessionInterim} ${phrase}` : phrase;
-              }
-            }
-
-            const incomingText = (sessionFinal || sessionInterim).trim();
-            if (!incomingText) return;
-
-            // Ignore conversational filler acknowledgments when idle
-            if (this.isFiller(incomingText) && !this.activeUtterance && !this.turnCommittedText) {
-              return;
-            }
-
-            const now = Date.now();
-            if (!this.activeTranscriptId) {
-              // Smart cross-pause stitching:
-              // Only stitch if prior turn was from the INTERVIEWER (never stitch into candidate speech!)
-              const canStitch = this.lastFinalizedTurn
-                && this.lastFinalizedTurn.role === "interviewer"
-                && (now - this.lastFinalizedTurn.at < 6000)
-                && (
-                  // Incomplete prompt ending: e.g. "tell me about", "what about", "how about", "explain", "is"
-                  /(tell me about|what about|how about|explain|describe|what is|what are|the|in|about|of|for|and|with)$/i.test(this.lastFinalizedTurn.text.trim())
-                  // Or direct continuation/prefix
-                  || incomingText.toLowerCase().startsWith(this.lastFinalizedTurn.text.toLowerCase())
-                );
-
-              if (canStitch && this.lastFinalizedTurn) {
-                this.activeTranscriptId = this.lastFinalizedTurn.id;
-                this.turnCommittedText = this.lastFinalizedTurn.text;
-              } else {
-                this.activeTranscriptId = `tr_${now}`;
-                this.turnCommittedText = "";
-              }
-            }
-
-            // Clean replacement of current session interim text onto committed text - NO string-merging heuristics!
-            const finalizedSoFar = [this.turnCommittedText, sessionFinal].filter(Boolean).join(" ").trim();
-            this.activeUtterance = [finalizedSoFar, sessionInterim].filter(Boolean).join(" ").trim();
-
-            const role = this.determineRole(this.activeUtterance);
-            const timestamp = this.getElapsedTimestamp();
-
-            // Update the single active transcript turn live in place with exact timestamp!
-            this.notify({
-              type: "transcript",
-              id: this.activeTranscriptId,
-              role,
-              text: this.activeUtterance,
-              timestamp,
-              final: false
-            });
-
-            if (this.speechDebounceTimer) {
-              clearTimeout(this.speechDebounceTimer);
-            }
-
-            // Smart adaptive debounce:
-            // If the utterance is already a clear question (e.g. "what is data"), finalize in 650ms for lightning-fast answers!
-            // For longer ongoing candidate speech, wait 1100ms.
-            const isQuestion = isLikelyQuestion(this.activeUtterance, cleanQuestion(this.activeUtterance));
-            const debounceMs = isQuestion ? 650 : 1100;
-            this.speechDebounceTimer = setTimeout(() => {
-              void this.finalizeActiveUtterance();
-            }, debounceMs);
-          };
-
-          recognition.onerror = (event: any) => {
-            // 'no-speech' is normal when room is quiet; keep listening
-            if (event.error === "no-speech") return;
-
-            if (event.error === "not-allowed") {
-              this.isRecognizing = false;
-              return;
-            }
-
-            // For transient errors on mobile (aborted, audio-capture, network), re-arm rapidly (35ms)
-            if (event.error === "audio-capture" || event.error === "aborted" || event.error === "network") {
-              this.isRecognizing = false;
-              if (this.restartTimer) clearTimeout(this.restartTimer);
-              this.restartTimer = setTimeout(() => {
-                if (!this.stopped && !this.isRecognizing && this.session && this.session.status !== "ended") {
-                  try { recognition.start(); } catch { /* ignore */ }
-                }
-              }, 35);
-            }
-          };
-
-          recognition.onend = () => {
-            this.isRecognizing = false;
-            // If recognition ended mid-utterance, commit current utterance so next instance continues seamlessly
-            if (this.activeTranscriptId && this.activeUtterance) {
-              this.turnCommittedText = this.activeUtterance;
-            }
-            // On Android Chrome, recognition automatically ends after speech; immediately re-arm without delay
-            if (!this.stopped && this.session && this.session.status !== "ended") {
-              try {
-                recognition.start();
-              } catch {
-                if (this.restartTimer) clearTimeout(this.restartTimer);
-                this.restartTimer = setTimeout(() => {
-                  if (!this.stopped && !this.isRecognizing && this.session && this.session.status !== "ended") {
-                    try { recognition.start(); } catch { /* ignore */ }
-                  }
-                }, 25);
-              }
-            }
-          };
-
-          recognition.start();
-          this.speechRecognition = recognition;
-
-          // Watchdog every 1000ms: keeps recognition continuously active even if Android silently dropped it
-          this.watchdogTimer = setInterval(() => {
-            if (!this.stopped && this.session && this.session.status !== "ended" && this.speechRecognition && !this.isRecognizing) {
-              try {
-                this.speechRecognition.start();
-              } catch {
-                /* already starting or active */
-              }
-            }
-          }, 1000);
-        } catch { /* SpeechRecognition not allowed */ }
+    // 4. Watchdog every 1200ms: keeps recognition continuously active even if Android silently dropped it
+    this.watchdogTimer = setInterval(() => {
+      if (!this.stopped && this.session && this.session.status !== "ended") {
+        if (!this.isRecognizing && !this.isStarting) {
+          this.safeStartRecognition();
+        }
       }
+    }, 1200);
+  }
+
+  private acquireWakeLock() {
+    if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
+      try {
+        (navigator as unknown as { wakeLock: { request: (type: string) => Promise<unknown> } }).wakeLock.request("screen").then(lock => {
+          this.wakeLock = lock;
+        }).catch(() => undefined);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  private scheduleRecognitionRestart(delayMs = 80) {
+    if (this.stopped || !this.session || this.session.status === "ended") return;
+    if (this.restartTimer) clearTimeout(this.restartTimer);
+    this.restartTimer = setTimeout(() => {
+      if (this.stopped || !this.session || this.session.status === "ended") return;
+      this.safeStartRecognition();
+    }, delayMs);
+  }
+
+  private safeStartRecognition() {
+    if (this.stopped || !this.session || this.session.status === "ended") return;
+    if (this.isRecognizing || this.isStarting) return;
+
+    if (!this.speechRecognition) {
+      this.initSpeechRecognition();
+      return;
+    }
+
+    try {
+      this.isStarting = true;
+      this.speechRecognition.start();
+    } catch {
+      this.isStarting = false;
+      this.isRecognizing = false;
+      // If start threw (e.g. InvalidStateError or stale IPC connection on Android), cleanly recreate
+      this.initSpeechRecognition();
+    }
+  }
+
+  private initSpeechRecognition() {
+    if (this.stopped || !this.session || this.session.status === "ended") return;
+
+    const SpeechRecognition = (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any }).SpeechRecognition
+      || (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) return;
+
+    // Safely detach previous instance if any
+    if (this.speechRecognition) {
+      try {
+        this.speechRecognition.stop();
+      } catch { /* ignore */ }
+      this.speechRecognition = null;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      const deviceLang = typeof navigator !== "undefined" ? (navigator.language || (navigator.languages && navigator.languages[0]) || "en-US") : "en-US";
+      recognition.lang = deviceLang;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        this.isRecognizing = true;
+        this.isStarting = false;
+      };
+
+      recognition.onresult = (event: any) => {
+        if (this.stopped) return;
+
+        let sessionFinal = "";
+        let sessionInterim = "";
+
+        for (let i = 0; i < event.results.length; i++) {
+          const res = event.results[i];
+          const phrase = res[0]?.transcript?.trim() || "";
+          if (!phrase) continue;
+          if (res.isFinal) {
+            sessionFinal = sessionFinal ? `${sessionFinal} ${phrase}` : phrase;
+          } else {
+            sessionInterim = sessionInterim ? `${sessionInterim} ${phrase}` : phrase;
+          }
+        }
+
+        const incomingText = (sessionFinal || sessionInterim).trim();
+        if (!incomingText) return;
+
+        // Ignore conversational filler acknowledgments when idle
+        if (this.isFiller(incomingText) && !this.activeUtterance && !this.turnCommittedText) {
+          return;
+        }
+
+        const now = Date.now();
+        if (!this.activeTranscriptId) {
+          const prior = this.lastFinalizedTurn;
+          const resumable = prior !== null && prior.role === "interviewer" && (now - prior.at) < 60000;
+          if (resumable && prior) {
+            const relation = repetitionOf(incomingText, prior.text);
+            if (relation === "repeat") return;
+            if (relation === "continuation") {
+              this.activeTranscriptId = prior.id;
+              this.turnCommittedText = prior.text;
+            } else {
+              this.activeTranscriptId = `tr_${now}`;
+              this.turnCommittedText = "";
+            }
+          } else {
+            this.activeTranscriptId = `tr_${now}`;
+            this.turnCommittedText = "";
+          }
+        }
+
+        // Clean replacement of current session interim text onto committed text - NO string-merging heuristics!
+        const finalizedSoFar = [this.turnCommittedText, sessionFinal].filter(Boolean).join(" ").trim();
+        this.activeUtterance = [finalizedSoFar, sessionInterim].filter(Boolean).join(" ").trim();
+
+        const role = this.determineRole(this.activeUtterance);
+        const timestamp = this.getElapsedTimestamp();
+
+        // Update the single active transcript turn live in place with exact timestamp!
+        this.notify({
+          type: "transcript",
+          id: this.activeTranscriptId,
+          role,
+          text: this.activeUtterance,
+          timestamp,
+          final: false
+        });
+
+        if (this.speechDebounceTimer) {
+          clearTimeout(this.speechDebounceTimer);
+        }
+
+        // Smart adaptive debounce:
+        // If the utterance is already a clear question (e.g. "what is data"), finalize in 650ms for lightning-fast answers!
+        // For longer ongoing candidate speech, wait 1100ms.
+        const isQuestion = isLikelyQuestion(this.activeUtterance, cleanQuestion(this.activeUtterance));
+        const debounceMs = isQuestion ? 650 : 1100;
+        this.speechDebounceTimer = setTimeout(() => {
+          void this.finalizeActiveUtterance();
+        }, debounceMs);
+      };
+
+      recognition.onerror = (event: any) => {
+        const error = event?.error;
+        this.isRecognizing = false;
+        this.isStarting = false;
+
+        // 'no-speech' is normal when room is quiet; onend will fire shortly and schedule seamless restart
+        if (error === "no-speech") return;
+
+        if (error === "not-allowed") {
+          this.notify({
+            type: "local",
+            phase: "ended",
+            error: "Microphone permission was not allowed. Please allow microphone access in your browser site settings."
+          });
+          return;
+        }
+
+        // For transient errors on mobile (aborted, audio-capture, network), schedule restart
+        this.scheduleRecognitionRestart(120);
+      };
+
+      recognition.onend = () => {
+        this.isRecognizing = false;
+        this.isStarting = false;
+
+        // If recognition ended mid-utterance, commit current utterance so next instance continues seamlessly
+        if (this.activeTranscriptId && this.activeUtterance) {
+          this.turnCommittedText = this.activeUtterance;
+        }
+
+        // On Android Chrome, recognition automatically ends after speech; immediately re-arm with safe 80ms delay
+        if (!this.stopped && this.session && this.session.status !== "ended") {
+          this.scheduleRecognitionRestart(80);
+        }
+      };
+
+      this.speechRecognition = recognition;
+      this.isStarting = true;
+      recognition.start();
+    } catch {
+      this.isStarting = false;
+      this.isRecognizing = false;
+      this.scheduleRecognitionRestart(200);
     }
   }
 
   /**
    * Check if incoming speech is the user reading/repeating the last generated answer (self-echo).
-   * Strictly requires consecutive n-gram matches (5+ words) from the answer.
-   * Legitimate questions containing interview topics are NEVER self-echo.
+   * Only strong question signals (a trailing "?", or an interrogative / modal /
+   * imperative lead like "what", "can you", "tell me") veto echo detection.
+   * Topic keywords alone must NOT veto: answer-reading in a mixed microphone
+   * always carries them, and vetoing on them is what wiped the displayed
+   * answer while the candidate read it. Short utterances (< 8 words) never
+   * count as echo — short topic prompts ("mutable vs immutable in python")
+   * must still reach the interviewer path, and short non-question speech is
+   * already rejected downstream without wiping anything.
    */
   private isSelfEcho(text: string): boolean {
     if (!this.lastAnswerText) return false;
@@ -527,9 +626,10 @@ export class LiveController {
     // Check within 60 seconds of the answer appearing
     if (elapsed > 60000) return false;
 
-    // If the utterance is classified as a question or begins with question interrogatives, it's NOT self-echo
-    if (isLikelyQuestion(text, cleanQuestion(text))) return false;
-    if (/^(what|how|why|when|where|which|who|can you|could you|tell me|explain|describe|difference between)\b/i.test(text.trim())) {
+    // Strong question signals are never self-echo.
+    const trimmed = text.trim();
+    if (/[?？]\s*$/.test(trimmed)) return false;
+    if (/^(what|how|why|when|where|which|who|can you|could you|would you|tell me|explain|describe|difference between|walk me through|give me)\b/i.test(trimmed)) {
       return false;
     }
 
@@ -537,15 +637,34 @@ export class LiveController {
     const cleanSpeech = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
     if (!cleanAnswer || !cleanSpeech) return false;
 
-    // 5-word n-gram check: if any 5 consecutive words in spoken speech appear in the answer, it's self-echo
     const speechTokens = cleanSpeech.split(" ").filter(w => w.length > 0);
-    if (speechTokens.length >= 5) {
-      for (let i = 0; i <= speechTokens.length - 5; i++) {
-        const penta = `${speechTokens[i]} ${speechTokens[i + 1]} ${speechTokens[i + 2]} ${speechTokens[i + 3]} ${speechTokens[i + 4]}`;
-        if (cleanAnswer.includes(penta)) {
-          return true;
-        }
+    if (speechTokens.length < 8) return false;
+
+    // 5-word n-gram check: if any 5 consecutive words in spoken speech appear in the answer, it's self-echo
+    for (let i = 0; i <= speechTokens.length - 5; i++) {
+      const penta = `${speechTokens[i]} ${speechTokens[i + 1]} ${speechTokens[i + 2]} ${speechTokens[i + 3]} ${speechTokens[i + 4]}`;
+      if (cleanAnswer.includes(penta)) {
+        return true;
       }
+    }
+
+    // Paraphrased / ASR-mangled reading ("tax" for "tags", dropped words)
+    // rarely keeps 5 clean words in a row. Fall back to a 4-gram check plus
+    // bag containment: if nearly every spoken word comes from the displayed
+    // answer, the candidate is reading it aloud.
+    for (let i = 0; i <= speechTokens.length - 4; i++) {
+      const tetra = `${speechTokens[i]} ${speechTokens[i + 1]} ${speechTokens[i + 2]} ${speechTokens[i + 3]}`;
+      if (cleanAnswer.includes(tetra)) {
+        return true;
+      }
+    }
+    const answerSet = new Set(cleanAnswer.split(" ").filter(w => w.length > 0));
+    let hits = 0;
+    for (const word of speechTokens) {
+      if (answerSet.has(word)) hits++;
+    }
+    if (hits / speechTokens.length >= 0.7) {
+      return true;
     }
 
     return false;
@@ -554,7 +673,11 @@ export class LiveController {
   private async finalizeActiveUtterance() {
     if (this.stopped || !this.activeUtterance.trim()) return;
 
-    const raw = this.activeUtterance.trim();
+    // Collapse long repeated runs streaming ASR echoes inside one turn
+    // ("...tags here ...tags here ...tags here" → one instance) before the
+    // text is displayed as final or used for question detection.
+    const raw = dedupeRepeatedPhrases(this.activeUtterance.trim());
+    if (!raw) return;
     const transcriptId = this.activeTranscriptId;
     const role = this.determineRole(raw);
     const timestamp = this.getElapsedTimestamp();
@@ -595,8 +718,12 @@ export class LiveController {
     // 2. If an answer is currently being streamed/generated, ignore new speech
     if (this.isGeneratingAnswer) return;
 
-    // 3. Deduplication: if the exact same question is repeated within 4 seconds, do not regenerate
-    if (this.lastProcessedQuestion && this.lastProcessedQuestion.toLowerCase() === clean.toLowerCase() && (Date.now() - this.lastAnswerAt) < 4000) {
+    // 3. Deduplication: growing ASR repeats are never exactly equal, so an
+    // exact comparison misses them and each repeat would emit a new question
+    // event — which clears the displayed answer mid-reading. Fuzzy containment
+    // + token overlap over a 30s window suppresses re-triggers while a
+    // genuinely new question still goes through immediately.
+    if (this.lastProcessedQuestion && (Date.now() - this.lastQuestionAt) < 30000 && isDuplicateQuestion(clean, this.lastProcessedQuestion)) {
       return;
     }
 
@@ -611,6 +738,7 @@ export class LiveController {
     }
 
     this.lastProcessedQuestion = clean;
+    this.lastQuestionAt = Date.now();
 
     await this.respondToQuestion(clean, raw);
   }
@@ -751,14 +879,8 @@ export class LiveController {
   async stop(stopRemote = true) {
     if (this.stopped) return;
     this.stopped = true;
-    if (this.keepAliveStream) {
-      this.keepAliveStream.getTracks().forEach(track => track.stop());
-      this.keepAliveStream = null;
-    }
-    if (this.keepAliveContext) {
-      try { void this.keepAliveContext.close(); } catch { /* ignore */ }
-      this.keepAliveContext = null;
-    }
+    this.isStarting = false;
+    this.isRecognizing = false;
     this.lastFinalizedTurn = null;
     if (this.wakeLock && typeof (this.wakeLock as { release?: () => Promise<void> }).release === "function") {
       (this.wakeLock as { release: () => Promise<void> }).release().catch(() => undefined);
