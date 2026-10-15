@@ -37,6 +37,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
   const [evidenceOpen, setEvidenceOpen] = useState(true);
   const [transcriptOpen, setTranscriptOpen] = useState(true);
   const [isLocked, setIsLocked] = useState(false);
+  const [manualInput, setManualInput] = useState("");
   const [readerSpeech, setReaderSpeech] = useState<ReaderSpeech | null>(null);
   const [readerCompletion, setReaderCompletion] = useState<ReaderCompletion | null>(null);
   const controller = useRef<LiveController | null>(null);
@@ -123,6 +124,12 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
       // Capture permissions remain in Start's user gesture, including on mobile.
       void live.start(mode, title, retention);
     } catch (error) { setState(current => ({ ...current, phase: "ended", error: messageOf(error) })); }
+  }
+  function askManualQuestion(text: string) {
+    const q = text.trim();
+    if (!q) return;
+    controller.current?.askQuestion(q);
+    setManualInput("");
   }
   function resizeAt(clientY: number) {
     const bounds = layout.current?.getBoundingClientRect();
@@ -232,7 +239,78 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
         <div className="live-main">
           <section className="live-question-panel">
             <div className="answer-panel-top"><div><span className="answer-spark"><Waves size={19} /></span><span>THE QUESTION IN FOCUS</span></div>{state.latency !== null && <span className="latency"><Clock3 size={13} /> {(state.latency / 1000).toFixed(1)}s</span>}</div>
-            <div className="question-block"><h2>{state.question || (active ? "Listening for the next question…" : "Great answers start with listening.")}</h2>{!state.question && <p>{active ? "Questions are detected automatically as the conversation unfolds. There’s nothing to type." : "Start an authorized live session. We’ll recognize spoken questions and connect them to your knowledge."}</p>}{state.keywords.length > 0 && <div className="keyword-list">{state.keywords.map(word => <span key={word}>{word}</span>)}</div>}</div>
+            <div className="question-block">
+              <h2>{state.question || (active ? "Listening for the next question…" : "Great answers start with listening.")}</h2>
+              {!state.question && <p>{active ? "Questions are detected automatically as the conversation unfolds. You can also ask or tap a question below." : "Start an authorized live session. We’ll recognize spoken questions and connect them to your knowledge."}</p>}
+              {state.keywords.length > 0 && <div className="keyword-list">{state.keywords.map(word => <span key={word}>{word}</span>)}</div>}
+              {active && (
+                <div style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <form
+                    onSubmit={e => {
+                      e.preventDefault();
+                      askManualQuestion(manualInput);
+                    }}
+                    style={{ display: "flex", gap: "8px" }}
+                  >
+                    <input
+                      type="text"
+                      value={manualInput}
+                      onChange={e => setManualInput(e.target.value)}
+                      placeholder="Ask or type a question (e.g. what is list)…"
+                      style={{
+                        flex: 1,
+                        padding: "7px 11px",
+                        fontSize: "12px",
+                        borderRadius: "5px",
+                        border: "1px solid #3d6050",
+                        background: "#162822",
+                        color: "#f6faee",
+                        outline: "none"
+                      }}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!manualInput.trim()}
+                      style={{
+                        padding: "7px 13px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        borderRadius: "5px",
+                        border: "none",
+                        background: manualInput.trim() ? "#4ade80" : "#2a4739",
+                        color: manualInput.trim() ? "#0d2818" : "#718f7d",
+                        cursor: manualInput.trim() ? "pointer" : "default",
+                        transition: "all 0.15s ease"
+                      }}
+                    >
+                      Ask
+                    </button>
+                  </form>
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={{ fontSize: "11px", color: "#a0b89a", fontWeight: 500 }}>Quick topics:</span>
+                    {["What is a list?", "Explain React hooks", "QuickSort vs MergeSort", "System design basics", "Tell me about yourself"].map(topic => (
+                      <button
+                        key={topic}
+                        type="button"
+                        onClick={() => askManualQuestion(topic)}
+                        style={{
+                          fontSize: "11px",
+                          padding: "3px 8px",
+                          borderRadius: "4px",
+                          border: "1px solid #375344",
+                          background: "#1b332b",
+                          color: "#bedbb4",
+                          cursor: "pointer",
+                          transition: "all 0.15s ease"
+                        }}
+                      >
+                        {topic}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </section>
           <details className="answer-evidence live-collapsible" open={!mobile || evidenceOpen} onToggle={event => { if (mobile) setEvidenceOpen(event.currentTarget.open); }}>
             <summary><BookOpen size={18} /><span>Answer evidence</span><ChevronDown size={17} /></summary>

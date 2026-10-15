@@ -3,6 +3,7 @@ import { AudioCapture, type AudioMode } from "./capture";
 import { parseLiveMessage, websocketUrl, type LiveMessage } from "./protocol";
 import type { Evidence, Session, User } from "./types";
 import { addTurnToStoredSession, createStoredSession, getStoredUser, searchStoredEvidence, stopStoredSession } from "./browser-storage";
+import { synthesizeLocalAnswer } from "./answer-generator";
 
 export type LocalEvent = { type: "local"; phase?: "capturing" | "connecting" | "reconnecting" | "ended"; detail?: string; error?: string; dropped?: number };
 type Question = Extract<LiveMessage, { type: "question" }>;
@@ -34,8 +35,16 @@ export class LiveController {
   private cancelledGeneration: string | null = null;
   private browserRecognition: unknown = null;
   private browserAnswerTimer: ReturnType<typeof setInterval> | null = null;
+  private questionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private notify: (event: LiveMessage | LocalEvent) => void, private onSession: (session: Session) => void) {}
+
+  askQuestion(questionText: string): void {
+    const trimmed = questionText.trim();
+    if (!trimmed || this.stopped) return;
+    this.notify({ type: "transcript", id: `tr_manual_${Date.now()}`, role: "interviewer", text: trimmed, final: true });
+    void this.handleBrowserQuestion(trimmed);
+  }
 
   /** Hold display updates only. Capture, speaker events, lifecycle, and backend generation continue. */
   setAnswerLocked(locked: boolean): void {
@@ -281,6 +290,10 @@ export class LiveController {
       clearInterval(this.browserAnswerTimer);
       this.browserAnswerTimer = null;
     }
+    if (this.questionDebounceTimer) {
+      clearTimeout(this.questionDebounceTimer);
+      this.questionDebounceTimer = null;
+    }
     const capture = this.capture; this.capture = null;
     try { capture?.stop(); }
     catch { this.notify({ type: "local", error: "Audio capture cleanup reported an error. Check the browser’s microphone sharing indicator." }); }
@@ -293,22 +306,49 @@ export class LiveController {
     if (this.stopped) return;
     this.notify({ type: "status", state: "listening", detail: "The assistant is listening live. Speak into your microphone." });
 
+    // In browser live mode, SpeechRecognition transcribes directly from the microphone.
+    // Release the PCM AudioCapture worklet so mobile OS (Android/iOS) frees the hardware microphone.
+    if (this.capture) {
+      try { this.capture.stop(); } catch { /* ignore */ }
+      this.capture = null;
+    }
+
     try {
       type SpeechResultItem = { [index: number]: { transcript: string }; isFinal: boolean; length: number };
       type SpeechEvent = { resultIndex: number; results: { [index: number]: SpeechResultItem; length: number } };
       type SpeechInstance = {
         continuous: boolean; interimResults: boolean; lang: string;
         onresult: ((event: SpeechEvent) => void) | null;
-        onerror: (() => void) | null; onend: (() => void) | null;
+        onerror: ((event: { error?: string }) => void) | null; onend: (() => void) | null;
         start: () => void; stop: () => void;
       };
       const windowObj = typeof window !== "undefined" ? (window as unknown as { SpeechRecognition?: new () => SpeechInstance; webkitSpeechRecognition?: new () => SpeechInstance }) : null;
       const Speech = windowObj ? (windowObj.SpeechRecognition || windowObj.webkitSpeechRecognition) : null;
       if (Speech) {
+        const isMobile = typeof navigator !== "undefined" && (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (typeof window !== "undefined" && window.innerWidth < 768));
         const recognition = new Speech();
-        recognition.continuous = true;
+        // On mobile, continuous: true causes speech engines to terminate prematurely or freeze.
+        // continuous: false with clean auto-restart on onend is the battle-tested mobile pattern.
+        recognition.continuous = !isMobile;
         recognition.interimResults = true;
         recognition.lang = "en-US";
+
+        const FILLERS = new Set(["okay", "ok", "yeah", "yes", "um", "uh", "so", "right", "sure", "well", "hello", "hi", "testing", "ah"]);
+        const dispatchFinalQuestion = (transcriptText: string) => {
+          const cleaned = transcriptText.trim();
+          if (!cleaned || this.stopped) return;
+          const words = cleaned.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).filter(Boolean);
+          if (words.length <= 1 && (words.length === 0 || FILLERS.has(words[0]))) return;
+          if (words.length === 2 && FILLERS.has(words[0]) && FILLERS.has(words[1])) return;
+
+          let cleanQuestion = cleaned;
+          if (words.length >= 2 && FILLERS.has(words[0])) {
+            const firstSpace = cleaned.indexOf(" ");
+            if (firstSpace !== -1) cleanQuestion = cleaned.slice(firstSpace + 1).trim();
+          }
+          void this.handleBrowserQuestion(cleanQuestion);
+        };
+
         recognition.onresult = (event: SpeechEvent) => {
           let interim = "";
           let final = "";
@@ -321,17 +361,44 @@ export class LiveController {
             this.notify({ type: "transcript", id: `tr_interim_${Date.now()}`, role: "interviewer", text: interim.trim(), final: false });
           }
           if (final.trim() && !this.stopped) {
-            const questionText = final.trim();
-            this.notify({ type: "transcript", id: `tr_final_${Date.now()}`, role: "interviewer", text: questionText, final: true });
-            this.handleBrowserQuestion(questionText);
+            const finalText = final.trim();
+            this.notify({ type: "transcript", id: `tr_final_${Date.now()}`, role: "interviewer", text: finalText, final: true });
+            if (this.questionDebounceTimer) clearTimeout(this.questionDebounceTimer);
+            this.questionDebounceTimer = setTimeout(() => {
+              dispatchFinalQuestion(finalText);
+            }, 550);
           }
         };
-        recognition.onerror = () => { /* ignore */ };
+
+        recognition.onerror = (event: { error?: string }) => {
+          const err = event?.error;
+          if (err === "no-speech") return;
+          if (err === "audio-capture" || err === "aborted") {
+            setTimeout(() => {
+              if (!this.stopped && this.browserRecognition) {
+                try { recognition.start(); } catch { /* ignore */ }
+              }
+            }, 400);
+            return;
+          }
+          if (err === "not-allowed") {
+            this.notify({
+              type: "local",
+              error: "Microphone permission is blocked. Tap the lock/settings icon in your browser address bar to allow microphone access."
+            });
+          }
+        };
+
         recognition.onend = () => {
           if (!this.stopped && this.browserRecognition) {
-            try { recognition.start(); } catch { /* ignore */ }
+            setTimeout(() => {
+              if (!this.stopped && this.browserRecognition) {
+                try { recognition.start(); } catch { /* ignore */ }
+              }
+            }, isMobile ? 80 : 250);
           }
         };
+
         recognition.start();
         this.browserRecognition = recognition;
       }
@@ -340,7 +407,7 @@ export class LiveController {
     }
   }
 
-  private handleBrowserQuestion(questionText: string): void {
+  private async handleBrowserQuestion(questionText: string): Promise<void> {
     if (this.stopped || !this.session) return;
     const genId = `gen_${Date.now()}`;
     const words = questionText.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).filter(w => w.length > 2);
@@ -356,29 +423,36 @@ export class LiveController {
       user = getStoredUser();
     } catch { /* ignore */ }
 
-    const role = user?.preferences?.role || "Software Engineer";
-    const company = user?.preferences?.company ? ` at ${user.preferences.company}` : "";
-    const style = user?.preferences?.answer_style || "concise";
+    let answerText = "";
+    let answerEvidence = evidence;
+    let answerKeywords = words.slice(0, 5);
 
-    let answer = "";
-    if (evidence.length > 0) {
-      const topEvidence = evidence[0];
-      answer = `Based on my experience in ${topEvidence.source_name || role}:\n\n` +
-        `• Core Approach: In my work on ${topEvidence.locator || "key initiatives"}, I focused on robust architecture, clear technical trade-offs, and measurable impact.\n\n` +
-        `• Relevant Context: ${topEvidence.text.slice(0, 240)}…\n\n` +
-        `• Outcome: Delivered reliable systems and maintained high engineering standards for the team.`;
-    } else {
-      answer = `As a ${role}${company}, here is how I approach this:\n\n` +
-        `• First, understand the core constraints and business requirements before jumping into solutions.\n\n` +
-        `• Next, break down the problem systematically, validate key assumptions, and maintain clean separation of concerns.\n\n` +
-        `• Finally, iterate with automated testing and continuous monitoring to ensure long-term reliability.`;
+    try {
+      const res = await fetch("/api/live/answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: questionText, preferences: user?.preferences, evidence })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && typeof data.answer === "string" && data.answer.trim().length > 10) {
+          answerText = data.answer.trim();
+          if (Array.isArray(data.evidence) && data.evidence.length > 0) answerEvidence = data.evidence;
+          if (Array.isArray(data.keywords) && data.keywords.length > 0) answerKeywords = data.keywords;
+        }
+      }
+    } catch {
+      // Offline or network error: will use local synthesizer
     }
 
-    if (style === "detailed") {
-      answer += `\n\nI also make sure to proactively align with cross-functional stakeholders and document critical design decisions.`;
+    if (!answerText) {
+      const fallback = synthesizeLocalAnswer(questionText, user?.preferences, evidence);
+      answerText = fallback.answer;
+      answerEvidence = fallback.evidence;
+      answerKeywords = fallback.keywords;
     }
 
-    const chunks = answer.split(" ");
+    const chunks = answerText.split(" ");
     let current = "";
     let i = 0;
     if (this.browserAnswerTimer) clearInterval(this.browserAnswerTimer);
@@ -400,8 +474,8 @@ export class LiveController {
           type: "answer_complete",
           generation_id: genId,
           answer: current,
-          evidence,
-          keywords: words.slice(0, 5),
+          evidence: answerEvidence,
+          keywords: answerKeywords,
           latency_ms: 280
         });
         if (this.session) {
@@ -412,12 +486,12 @@ export class LiveController {
               text: questionText,
               question: questionText,
               answer: current,
-              evidence,
+              evidence: answerEvidence,
               created_at: new Date().toISOString()
             });
           } catch { /* ignore */ }
         }
       }
-    }, 40);
+    }, 25);
   }
 }
