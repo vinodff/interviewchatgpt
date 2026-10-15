@@ -1,45 +1,71 @@
-import { handleBrowserStorageRequest } from "./browser-storage";
-
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); this.name = "ApiError"; }
 }
 
-export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const isClient = typeof window !== "undefined";
-  const host = isClient ? (window.location.hostname || window.location.host || "") : "";
-  const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
-  const isHostedDomain = host !== "" && !isLocal;
+const backendUnavailable = "The backend service is unavailable. Check that the backend is running and configured, then try again.";
 
-  // When deployed on Vercel or any hosted static domain without an external backend URL configured,
-  // handle directly using local browser storage for 0ms latency, offline reliability, and zero auth barriers.
-  if (isHostedDomain && !process.env.NEXT_PUBLIC_BACKEND_URL) {
-    return handleBrowserStorageRequest<T>(path, options);
+function isAbort(error: unknown, signal?: AbortSignal | null): boolean {
+  return signal?.aborted === true || error instanceof Error && error.name === "AbortError";
+}
+
+function safeText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").trim();
+  if (!text || text.length > 500 || /AIza|\bBearer\s+\S|\b(?:api[_ -]?key|secret|password|authorization|access[_ -]?token)\s*[:=]|[?&](?:key|token|secret|signature)=|Traceback|\bat\s+\S+\s+\([^)]*:\d+:\d+\)/i.test(text)) return null;
+  return text;
+}
+
+function errorDetail(body: unknown): string | null {
+  if (!body || typeof body !== "object" || !("detail" in body)) return null;
+  const direct = safeText(body.detail);
+  if (direct) return direct;
+  if (!Array.isArray(body.detail)) return null;
+  const messages: string[] = [];
+  for (const value of body.detail.slice(0, 3)) {
+    if (!value || typeof value !== "object" || !("msg" in value)) continue;
+    const message = safeText(value.msg);
+    if (message) messages.push(message);
   }
+  return messages.length ? messages.join(". ") : null;
+}
 
+function defaultError(status: number): string {
+  if (status >= 500) return backendUnavailable;
+  if (status === 401) return "Sign in is required or your credentials were not accepted.";
+  if (status === 403) return "You do not have permission to complete this request.";
+  if (status === 404 || status === 410) return "This server resource is unavailable. Refresh your workspace and try again.";
+  if (status === 409) return "This request conflicts with the current server state. Refresh your workspace and try again.";
+  if (status === 429) return "Too many requests. Wait a moment and try again.";
+  return "The server could not complete this request. Check your input and try again.";
+}
+
+/** Use the authenticated backend on every hostname; failures never become local data. */
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  options.signal?.throwIfAborted();
+  const headers = new Headers(options.headers);
+  headers.set("X-InterviewPilot", "1");
+  if (options.body && !(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
+  let response: Response;
   try {
-    const headers = new Headers(options.headers);
-    headers.set("X-InterviewPilot", "1");
-    if (options.body && !(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
-    const response = await fetch(`/api${path}`, { ...options, headers, credentials: "include", cache: "no-store" });
-    if (!response.ok) {
-      // If the backend is not running or returned a gateway error, seamlessly fallback to browser storage
-      if (isClient && (response.status >= 500 || response.status === 404)) {
-        return handleBrowserStorageRequest<T>(path, options);
-      }
-      let detail = "The service could not complete this request. Please try again.";
-      try {
-        const body: unknown = await response.json();
-        if (body && typeof body === "object" && "detail" in body && typeof body.detail === "string") detail = body.detail;
-        else if (body && typeof body === "object" && "detail" in body && Array.isArray(body.detail)) detail = body.detail.map((item: { msg?: string; loc?: string[] }) => `${item.loc?.slice(1).join(" ") || "Request"}: ${item.msg || "invalid value"}`).join(". ");
-      } catch { /* A proxy failure may return HTML */ }
-      throw new ApiError(detail, response.status);
-    }
-    return await response.json() as T;
+    response = await fetch(`/api${path}`, { ...options, headers, credentials: "include", cache: "no-store" });
+    options.signal?.throwIfAborted();
   } catch (error) {
-    if (isClient) {
-      return handleBrowserStorageRequest<T>(path, options);
+    if (isAbort(error, options.signal)) throw error;
+    throw new ApiError(backendUnavailable, 0);
+  }
+  if (!response.ok) {
+    let detail: string | null = null;
+    // Internal and proxy failures must not echo provider credentials or stack traces.
+    if (response.status < 500) {
+      try { detail = errorDetail(await response.json()); }
+      catch (error) { if (isAbort(error, options.signal)) throw error; }
     }
-    throw error;
+    throw new ApiError(detail || defaultError(response.status), response.status);
+  }
+  try { const result: unknown = await response.json(); options.signal?.throwIfAborted(); return result as T; }
+  catch (error) {
+    if (isAbort(error, options.signal)) throw error;
+    throw new ApiError("The backend returned an invalid response. Refresh your workspace and try again.", 502);
   }
 }
 

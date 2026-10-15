@@ -2,6 +2,28 @@ import { describe, expect, it } from "vitest";
 import { initialLiveState, parseLiveMessage, reduceLiveMessage, websocketUrl } from "../lib/protocol";
 
 describe("live answer generations", () => {
+  it("never replaces an authoritative final transcript with a delayed interim", () => {
+    const state = reduceLiveMessage(initialLiveState, { type: "transcript", id: "turn", role: "user", text: "I chose PostgreSQL for transactions.", final: true });
+    expect(reduceLiveMessage(state, { type: "transcript", id: "turn", role: "unknown", text: "I chose", final: false })).toBe(state);
+    expect(reduceLiveMessage(state, { type: "transcript", id: "turn", role: "user", text: "I chose PostgreSQL for transactions.", final: true }).transcripts).toHaveLength(1);
+  });
+  it("preserves a streamed answer while one transcription channel renews", () => {
+    let state = reduceLiveMessage({ ...initialLiveState, phase: "listening" }, { type: "question", generation_id: "current", question: "Explain retry safety", keywords: [] });
+    state = reduceLiveMessage(state, { type: "answer_delta", generation_id: "current", text: "Use idempotent " });
+    state = reduceLiveMessage(state, { type: "transcription_status", channel: 0, state: "reconnecting", detail: "Renewing interviewer transcription" });
+    expect(state.phase).toBe("listening"); expect(state.generation).toBe("current"); expect(state.answer).toBe("Use idempotent ");
+    state = reduceLiveMessage(state, { type: "transcription_status", channel: 1, state: "reconnecting", detail: "Reconnecting microphone" });
+    state = reduceLiveMessage(state, { type: "transcription_status", channel: 0, state: "listening", detail: "Ready" });
+    expect(Object.keys(state.transcriptionWarnings)).toEqual(["1"]);
+    state = reduceLiveMessage(state, { type: "answer_complete", generation_id: "current", answer: "Use idempotent operations.", evidence: [], keywords: [], latency_ms: 25 });
+    expect(state.answer).toBe("Use idempotent operations."); expect(state.answering).toBe(false);
+  });
+  it("validates provider status without accepting unknown channels or states", () => {
+    expect(parseLiveMessage(JSON.stringify({ type: "transcription_status", channel: 0, state: "reconnecting", detail: "Renewing" }))).not.toBeNull();
+    for (const patch of [{ channel: 2 }, { channel: "0" }, { state: "invalid" }, { detail: 5 }]) {
+      expect(parseLiveMessage(JSON.stringify({ type: "transcription_status", channel: 0, state: "reconnecting", detail: "Renewing", ...patch }))).toBeNull();
+    }
+  });
   it("ignores late deltas, completions and cancellation from a superseded question", () => {
     let state = reduceLiveMessage(initialLiveState, { type: "question", generation_id: "first", question: "First?", keywords: [] });
     state = reduceLiveMessage(state, { type: "answer_delta", generation_id: "first", text: "Old answer" });

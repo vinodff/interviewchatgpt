@@ -147,13 +147,18 @@ export function LiveAnswerPreferences({ user, onUser }: { user: User; onUser: (u
   const [autoState, setAutoState] = useState<"idle" | "saving" | "applied">("idle");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef(preferences);
-  latest.current = preferences;
-  function setPreferences(value: Preferences) { setDraft({ signature, value }); setSaved(false); }
+  useEffect(() => {
+    latest.current = preferences;
+  }, [preferences]);
+  function setPreferences(value: Preferences) {
+    setDraft({ signature, value });
+    setSaved(false);
+    setAutoState("saving");
+  }
   // Auto-apply: every dropdown/slider change persists immediately so the next
   // question uses it. No Save click required (fixes "selected parameters not applying").
   useEffect(() => {
     if (draftSignature === signature) return;
-    setAutoState("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       setBusy(true);

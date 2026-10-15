@@ -26,6 +26,9 @@ class Preferences(BaseModel):
     grounding: Literal["balanced", "strict"] = "balanced"
     reading_mode: Literal["auto", "speech", "paced", "off"] = "auto"
     reading_wpm: int = Field(default=130, ge=60, le=240)
+    answer_text_size: int = Field(default=17, ge=14, le=24)
+    answer_font: Literal["system", "serif", "readable"] = "system"
+    answer_theme: Literal["default", "easy", "contrast"] = "default"
     job_description: str = Field(default="", max_length=12000)
 
 
