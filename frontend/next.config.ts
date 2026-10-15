@@ -5,6 +5,9 @@ const config: NextConfig = {
   output: "standalone",
   experimental: { cpus: 1, workerThreads: true },
   async rewrites() {
+    if (process.env.VERCEL && !process.env.BACKEND_INTERNAL_URL) {
+      return [];
+    }
     return [{ source: "/api/:path*", destination: `${backend}/api/:path*` }];
   },
   async headers() {
