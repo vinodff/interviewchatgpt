@@ -76,6 +76,57 @@ export function cleanQuestion(fullText: string): string {
   return q.trim();
 }
 
+export function isLikelyQuestion(raw: string, clean: string): boolean {
+  const r = raw.trim();
+  const c = clean.trim();
+  if (c.length < 5) return false;
+
+  // 1. Definite negative: candidate speaking or reading explanations
+  // If the sentence starts with first-person statements or explanatory preambles without a question mark, reject it
+  if (/^(i\s|i'm|in my|in python|for example|basically|first|next|then|here|my|as a|so if|when we|it is|it has|this is|they are|we can|you can)\b/i.test(c)) {
+    if (!r.endsWith("?")) return false;
+  }
+
+  // 2. Direct question mark
+  if (r.endsWith("?") || c.endsWith("?")) return true;
+
+  // 3. Question interrogatives (e.g. "what", "how", "why", "when", "where", "which", "who")
+  if (/^(what|how|why|when|where|which|who|whom|whose)\b/i.test(r) || /^(what|how|why|when|where|which|who|whom|whose)\b/i.test(c)) {
+    return true;
+  }
+
+  // 4. Modal / auxiliary interview questions (e.g. "can you", "could you", "would you")
+  if (/^(can you|could you|would you|will you|should you)\b/i.test(r) || /^(can you|could you|would you|will you|should you)\b/i.test(c)) {
+    return true;
+  }
+
+  // 5. Inverted auxiliary verbs (e.g. "is there", "are there", "do you", "does it", "have you", "did you")
+  if (/^(is|are|do|does|did|have|has|was|were)\s+(you|we|there|it|a|an|the|this|that|they)\b/i.test(r) ||
+      /^(is|are|do|does|did|have|has|was|were)\s+(you|we|there|it|a|an|the|this|that|they)\b/i.test(c)) {
+    return true;
+  }
+
+  // 6. Direct request / imperative to explain, describe, solve
+  if (/^(explain|describe|tell me|walk me through|clarify|elaborate|give me an example)\b/i.test(r) ||
+      /^(explain|describe|tell me|walk me through|clarify|elaborate|give me an example)\b/i.test(c)) {
+    return true;
+  }
+
+  // 7. Direct coding prompts (e.g. "write code for...", "implement...", "give me python code for...")
+  if (/^(write|show|give|implement|create|code|draft)\s+(a|an|the|me|us|some)?\s*(code|program|function|script|algorithm|class|method|solution|linked list|palindrome|two sum|hash map)\b/i.test(r) ||
+      /^(write|show|give|implement|create|code|draft)\s+(a|an|the|me|us|some)?\s*(code|program|function|script|algorithm|class|method|solution|linked list|palindrome|two sum|hash map)\b/i.test(c)) {
+    return true;
+  }
+
+  // 8. Short technical coding topic prompts (under 7 words)
+  const words = c.split(/\s+/);
+  if (words.length <= 7 && /(palindrome|linked list|two sum|binary search|hash map|reverse string|fibonacci)/i.test(c)) {
+    return true;
+  }
+
+  return false;
+}
+
 export class LiveController {
   private capture: AudioCapture | null = null;
   private socket: WebSocket | null = null;
@@ -95,8 +146,19 @@ export class LiveController {
   private dropped = 0;
   private session: Session | null = null;
   private lastServerAt = Date.now();
+  /** Tracks the last generated answer so we can detect self-echo (user reading the answer aloud) */
+  private lastAnswerText = "";
+  private lastAnswerAt = 0;
+  /** True while an answer is actively being generated / streamed */
+  private isGeneratingAnswer = false;
+  /** When true, locks the currently displayed answer from being replaced by new speech */
+  private isAnswerLocked = false;
 
   constructor(private notify: (event: LiveMessage | LocalEvent) => void, private onSession: (session: Session) => void) {}
+
+  setAnswerLocked(locked: boolean) {
+    this.isAnswerLocked = locked;
+  }
 
   async start(mode: AudioMode, title: string, retention: boolean) {
     try {
@@ -346,6 +408,44 @@ export class LiveController {
     }
   }
 
+  /**
+   * Check if incoming speech is the user reading/repeating the last generated answer (self-echo).
+   * Checks both 3-word phrase overlap and significant keyword overlap.
+   */
+  private isSelfEcho(text: string): boolean {
+    if (!this.lastAnswerText) return false;
+    const elapsed = Date.now() - this.lastAnswerAt;
+    // Check within 60 seconds of the answer appearing
+    if (elapsed > 60000) return false;
+
+    const cleanAnswer = this.lastAnswerText.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+    const cleanSpeech = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+    if (!cleanAnswer || !cleanSpeech) return false;
+
+    // 1. 3-word n-gram check: if any 3 consecutive words in spoken speech appear in the answer, it's 100% self-echo
+    const speechTokens = cleanSpeech.split(" ").filter(w => w.length > 0);
+    if (speechTokens.length >= 3) {
+      for (let i = 0; i <= speechTokens.length - 3; i++) {
+        const tri = `${speechTokens[i]} ${speechTokens[i + 1]} ${speechTokens[i + 2]}`;
+        if (cleanAnswer.includes(tri)) {
+          return true;
+        }
+      }
+    }
+
+    // 2. Significant words overlap check: if >= 25% of spoken words are present in the answer
+    const answerWords = new Set(cleanAnswer.split(" ").filter(w => w.length > 3));
+    const speechWords = speechTokens.filter(w => w.length > 3);
+    if (speechWords.length === 0) return false;
+
+    let matchCount = 0;
+    for (const w of speechWords) {
+      if (answerWords.has(w)) matchCount++;
+    }
+
+    return matchCount / speechWords.length >= 0.25;
+  }
+
   private async finalizeActiveUtterance() {
     if (this.stopped || !this.activeUtterance.trim()) return;
 
@@ -372,14 +472,32 @@ export class LiveController {
     const clean = cleanQuestion(raw);
     if (clean.length < 5) return;
 
-    const isQuestion = raw.includes("?")
-      || /^(what|how|why|when|where|which|who|can|could|would|is|are|do|does|did|explain|describe|tell|walk me through|difference)/i.test(raw)
-      || /^(what|how|why|when|where|which|who|can|could|would|is|are|do|does|did|explain|describe|tell|walk me through|difference)/i.test(clean)
-      || /(python|javascript|react|database|dataset|dictionary|sql|api|system|service|memory|class|function|design|scale|code|git|docker|linked list|hash map|queue|stack|tree|array)/i.test(clean);
+    // === SMART ANTI-OVERWRITE SAFEGUARDS ===
 
-    if (isQuestion) {
-      await this.respondToQuestion(clean, raw);
+    // 1. If user locked the answer in UI, do not overwrite
+    if (this.isAnswerLocked) return;
+
+    // 2. If an answer is currently being streamed/generated, ignore new speech
+    if (this.isGeneratingAnswer) return;
+
+    // 3. Cooldown protection: within 12s of an answer, only allow unmistakable new questions
+    const timeSinceLastAnswer = Date.now() - this.lastAnswerAt;
+    const isUnmistakableQuestion = /^(can you|could you|what is|how do|how can|why is|explain|write|implement)\b/i.test(clean) || raw.endsWith("?");
+    if (this.lastAnswerAt > 0 && timeSinceLastAnswer < 12000 && !isUnmistakableQuestion) {
+      return;
     }
+
+    // 4. Self-echo detection: if the user is reading the displayed answer aloud, ignore it
+    if (this.isSelfEcho(clean) || this.isSelfEcho(raw)) {
+      return;
+    }
+
+    // 5. Smart question classification: reject candidate explanations and statements
+    if (!isLikelyQuestion(raw, clean)) {
+      return;
+    }
+
+    await this.respondToQuestion(clean, raw);
   }
 
   private isFiller(text: string): boolean {
@@ -390,90 +508,100 @@ export class LiveController {
 
   async respondToQuestion(question: string, rawUtterance?: string) {
     if (this.stopped) return;
-    const genId = `gen_${Date.now()}`;
-    const displayQuestion = question.length > 5 ? question : (rawUtterance || question);
-    const rawWords = displayQuestion.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 3);
-    const words = Array.from(new Set(rawWords)).slice(0, 5);
 
-    this.notify({
-      type: "question",
-      generation_id: genId,
-      question: displayQuestion,
-      keywords: words
-    });
-
-    const user = getStoredUser();
-    const prefs = user.preferences || {};
-    const role = prefs.role || "Software Engineer";
-    const evidence = searchStoredEvidence(displayQuestion);
-
-    let answerText = "";
-
-    // 1. Try calling Gemini AI route
+    this.isGeneratingAnswer = true;
     try {
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: displayQuestion,
-          role,
-          preferences: prefs,
-          evidence
-        }),
-        signal: AbortSignal.timeout(6500)
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.ok && data.answer) {
-          answerText = data.answer;
-        }
-      }
-    } catch {
-      /* fallback to instant knowledge engine */
-    }
+      const genId = `gen_${Date.now()}`;
+      const displayQuestion = question.length > 5 ? question : (rawUtterance || question);
+      const rawWords = displayQuestion.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 3);
+      const words = Array.from(new Set(rawWords)).slice(0, 5);
 
-    // 2. Fallback to instant client-side knowledge engine if Gemini is unavailable
-    if (!answerText) {
-      const result = generateHumanAnswer(displayQuestion, role, prefs, evidence);
-      answerText = result.answer;
-    }
-
-    // Fast, natural streaming (22ms cadence)
-    const tokens = answerText.split(/(\s+)/);
-    let accumulated = "";
-
-    for (let i = 0; i < tokens.length; i += 2) {
-      if (this.stopped) return;
-      const piece = (tokens[i] || "") + (tokens[i + 1] || "");
-      accumulated += piece;
       this.notify({
-        type: "answer_delta",
+        type: "question",
         generation_id: genId,
-        text: piece
-      });
-      await new Promise(r => setTimeout(r, 22));
-    }
-
-    if (this.stopped) return;
-    this.notify({
-      type: "answer_complete",
-      generation_id: genId,
-      answer: accumulated.trim(),
-      evidence,
-      keywords: words,
-      latency_ms: 180
-    });
-
-    if (this.session) {
-      addTurnToStoredSession(this.session.id, {
-        id: `turn_${Date.now()}`,
-        role: "interviewer",
-        text: rawUtterance || displayQuestion,
         question: displayQuestion,
+        keywords: words
+      });
+
+      const user = getStoredUser();
+      const prefs = user.preferences || {};
+      const role = prefs.role || "Software Engineer";
+      const evidence = searchStoredEvidence(displayQuestion);
+
+      let answerText = "";
+
+      // 1. Try calling Gemini AI route
+      try {
+        const response = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question: displayQuestion,
+            role,
+            preferences: prefs,
+            evidence
+          }),
+          signal: AbortSignal.timeout(6500)
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.ok && data.answer) {
+            answerText = data.answer;
+          }
+        }
+      } catch {
+        /* fallback to instant knowledge engine */
+      }
+
+      // 2. Fallback to instant client-side knowledge engine if Gemini is unavailable
+      if (!answerText) {
+        const result = generateHumanAnswer(displayQuestion, role, prefs, evidence);
+        answerText = result.answer;
+      }
+
+      // Fast, natural streaming (22ms cadence)
+      const tokens = answerText.split(/(\s+)/);
+      let accumulated = "";
+
+      for (let i = 0; i < tokens.length; i += 2) {
+        if (this.stopped) return;
+        const piece = (tokens[i] || "") + (tokens[i + 1] || "");
+        accumulated += piece;
+        this.notify({
+          type: "answer_delta",
+          generation_id: genId,
+          text: piece
+        });
+        await new Promise(r => setTimeout(r, 22));
+      }
+
+      if (this.stopped) return;
+      this.notify({
+        type: "answer_complete",
+        generation_id: genId,
         answer: accumulated.trim(),
         evidence,
-        created_at: new Date().toISOString()
+        keywords: words,
+        latency_ms: 180
       });
+
+      // Store the answer for self-echo detection and set cooldown timestamp
+      this.lastAnswerText = accumulated.trim();
+      this.lastAnswerAt = Date.now();
+
+      if (this.session) {
+        addTurnToStoredSession(this.session.id, {
+          id: `turn_${Date.now()}`,
+          role: "interviewer",
+          text: rawUtterance || displayQuestion,
+          question: displayQuestion,
+          answer: accumulated.trim(),
+          evidence,
+          created_at: new Date().toISOString()
+        });
+      }
+    } finally {
+      this.isGeneratingAnswer = false;
     }
   }
 

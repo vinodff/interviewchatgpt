@@ -16,7 +16,7 @@ export async function POST(req: Request) {
     const level = preferences.english_level || "everyday";
     const length = ["concise", "balanced", "detailed"].includes(preferences.answer_style) ? preferences.answer_style : "concise";
     const tone = preferences.answer_tone || "professional";
-    const codeIntent = /(write|show|give|implement|create|generate|draft).{0,30}(code|function|method|program|script|implementation)|write.*python|python.*(code|function|program|script)|^(code|python code)/i.test(question);
+    const codeIntent = /(write|show|give|implement|create|generate|draft).{0,30}(code|function|method|program|script|implementation|solution)|write.*python|python.*(code|function|program|script)|^(code|python code)|palindrome|(code|solution|program)\s+(for|to)\s+(palindrome|linked list|two sum|reverse|anagram|fibonacci|binary search)/i.test(question);
     const delivery = codeIntent ? "code" : rawDelivery;
 
     const prompt = `You are a real-time interview assistant helping a candidate in an active technical interview.
@@ -31,7 +31,11 @@ QUESTION: "${question}"
 
 CRITICAL INSTRUCTIONS:
 1. Directly answer the specific technical or behavioral question accurately, in first-person voice the candidate can speak ("I use...", "In my work...").
-2. CODE HAS TOP PRIORITY: if delivery is "code" or the question asks to write/show/implement Python code (e.g. linked list, dictionary, algorithms), output a complete runnable implementation FIRST in a fenced block tagged with the language (e.g. \`\`\`python), preserving indentation. Add at most one short plain sentence after the block. Never replace requested code with a paragraph explanation.
+2. CODE HAS TOP PRIORITY & MUST BE THE SIMPLEST, MOST EFFICIENT, AND EASIEST TO EXPLAIN:
+   - If delivery is "code" or the question asks to write/show/implement code (e.g. palindrome, linked list, two sum, dictionary, sorting, algorithms), output a complete runnable implementation FIRST in a fenced block tagged with the language (e.g. \`\`\`python), preserving indentation.
+   - ALWAYS write the SIMPLEST, CLEANEST, AND MOST EXPLAINABLE code possible. DO NOT write complicated, over-engineered, or overly nested code. For example, for a palindrome check, simply normalize alphanumeric lowercase chars and compare with reverse slice clean == clean[::-1]; for two sum use a single-pass hash map seen = {}. The candidate must be able to walk an interviewer through the logic effortlessly.
+   - After the code block, add exactly one plain, concise sentence explaining the solution and its time/space complexity (e.g. "I clean the string and compare it to its reverse slice, running in O(N) linear time.").
+   - Never replace requested code with a wall of text.
 3. If delivery is "natural": deliver 2-3 flowing spoken sentences only. STRICTLY FORBIDDEN: bullet points (• - *), numbered lists (1. 2.), markdown headers (###), bold markers (**), or rigid section templates like "**Structure**:". No pointers. Speak naturally with contractions where appropriate, matching the candidate's own short spoken style.
 4. If delivery is "talking_points": format as 3 clear bullet points with bold highlights.
 5. If delivery is "structured": format as numbered steps.

@@ -12,6 +12,24 @@ interface KnowledgeTopic {
 
 const TOPICS: KnowledgeTopic[] = [
   {
+    keywords: ["palindrome", "check palindrome", "palindrome string", "palindrome python", "valid palindrome"],
+    title: "Palindrome in Python",
+    simple: "A palindrome is a word that reads the same forwards and backwards, like 'racecar'. In Python, the simplest way to check this is to clean the string to lowercase letters and numbers, then compare it with its reverse slice using clean == clean[::-1]. It runs in O(N) time and is very clean and easy to explain in an interview.",
+    everyday: "A palindrome reads identically forwards and backwards. In Python, the most efficient and readable solution normalizes the string to lowercase alphanumeric characters (''.join(c.lower() for c in s if c.isalnum())) and compares it to its reverse using slice notation (clean == clean[::-1]). This takes O(N) linear time and is simple and bug-free. If the interviewer asks for O(1) space, you can also describe a two-pointer approach comparing characters from both ends.",
+    advanced: "Palindrome validation verifies character symmetry around a center axis. The idiomatic Python solution normalizes the string to alphanumeric characters and performs a slice comparison clean == clean[::-1], taking O(N) time with vectorized C-level performance in CPython. For strict in-place constraints with O(1) auxiliary memory, a two-pointer technique increments a left index and decrements a right index while skipping non-alphanumeric characters, terminating when pointers cross.",
+    points: [
+      "**String Normalization**: Filter out non-alphanumeric characters and lowercase using `''.join(c.lower() for c in s if c.isalnum())`.",
+      "**Idiomatic Reverse Comparison**: Compare with reverse slice `clean == clean[::-1]` for clean, readable O(N) validation.",
+      "**Time & Space Complexity**: Runs in O(N) time with O(N) space for the cleaned string; simple and bug-free to present.",
+      "**Two-Pointer Alternative**: Mention left/right pointer comparison from both ends if O(1) auxiliary space is requested."
+    ],
+    steps: [
+      "1. **Normalize Input**: Strip punctuation and whitespace, converting all letters to lowercase so comparisons are case-insensitive.",
+      "2. **Compare with Reverse**: Return `clean == clean[::-1]`, which takes advantage of Python's highly optimized internal string comparison.",
+      "3. **Explain Tradeoffs**: Explain O(N) time complexity to the interviewer, noting two-pointer traversal as an in-place alternative."
+    ]
+  },
+  {
     keywords: ["dictionary", "dict", "key value", "hash map", "hashmap", "python dictionary"],
     title: "Python Dictionary",
     simple: "In Python, a dictionary is like a real-world dictionary where you look up a word to find its meaning. It stores data as key-value pairs using curly braces. It is super fast because you don't have to search through a list—you just ask for the key and immediately get the value.",
@@ -241,10 +259,12 @@ export function findMatchingTopic(question: string): KnowledgeTopic | null {
 
 export function isCodeRequest(question: string): boolean {
   const q = question.toLowerCase();
-  if (/(write|show|give|implement|create|generate|draft).{0,30}(code|function|method|program|script|implementation)/i.test(q)) return true;
+  if (/(write|show|give|implement|create|generate|draft).{0,30}(code|function|method|program|script|implementation|solution)/i.test(q)) return true;
   if (/^(code|python code|write code|show code|give me.*code)/i.test(q.trim())) return true;
   if (/write.*python/i.test(q) || /python.*(code|function|program|script)/i.test(q)) return true;
-  if (/(implement|define).{0,30}(function|class|dict|dictionary|list)/i.test(q)) return true;
+  if (/(implement|define).{0,30}(function|class|dict|dictionary|list|palindrome|linked list|two sum)/i.test(q)) return true;
+  if (/(code|solution|program)\s+(for|to)\s+(palindrome|linked list|two sum|reverse|anagram|fibonacci|binary search)/i.test(q)) return true;
+  if (/palindrome/i.test(q)) return true;
   return false;
 }
 
@@ -259,37 +279,233 @@ function codeLanguage(question: string): string {
 function codeExample(question: string, language: string): string {
   const q = question.toLowerCase();
   if (language === "python") {
+    // 1. Palindrome: simplest, most efficient and easily explainable
+    if (/palindrome/.test(q)) {
+      return `def is_palindrome(s: str) -> bool:
+    # 1. Clean string: keep only lowercase alphanumeric characters
+    clean = "".join(c.lower() for c in s if c.isalnum())
+    # 2. Check if clean string equals its reverse slice
+    return clean == clean[::-1]
+
+# Tests:
+print(is_palindrome("racecar"))  # True
+print(is_palindrome("A man, a plan, a canal: Panama"))  # True
+print(is_palindrome("hello"))    # False`;
+    }
+    // 2. Two Sum: simple single-pass hash map
+    if (/two ?sum/.test(q)) {
+      return `def two_sum(nums: list[int], target: int) -> list[int]:
+    seen = {}  # maps number to its index
+    for i, num in enumerate(nums):
+        complement = target - num
+        if complement in seen:
+            return [seen[complement], i]
+        seen[num] = i
+    return []
+
+# Test:
+print(two_sum([2, 7, 11, 15], 9))  # [0, 1]`;
+    }
+    // 3. Reverse String
+    if (/reverse.*(string|word)|string.*reverse/.test(q)) {
+      return `def reverse_string(s: str) -> str:
+    # Python slice [::-1] reverses the string efficiently in O(N)
+    return s[::-1]
+
+# Test:
+print(reverse_string("hello"))  # "olleh"`;
+    }
+    // 4. Anagram
+    if (/anagram/.test(q)) {
+      return `from collections import Counter
+
+def is_anagram(s: str, t: str) -> bool:
+    # Compare character frequencies
+    return Counter(s) == Counter(t)
+
+# Test:
+print(is_anagram("listen", "silent"))  # True`;
+    }
+    // 5. Binary Search: clean iterative standard
+    if (/binary ?search/.test(q)) {
+      return `def binary_search(nums: list[int], target: int) -> int:
+    left, right = 0, len(nums) - 1
+    while left <= right:
+        mid = (left + right) // 2
+        if nums[mid] == target:
+            return mid
+        elif nums[mid] < target:
+            left = mid + 1
+        else:
+            right = mid - 1
+    return -1
+
+# Test:
+print(binary_search([1, 3, 5, 7, 9], 7))  # 3`;
+    }
+    // 6. Fibonacci: clean O(1) space loop
+    if (/fibonacci|fib\b/.test(q)) {
+      return `def fibonacci(n: int) -> int:
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    return b
+
+# Test:
+print(fibonacci(7))  # 13`;
+    }
     if (/linked ?list|node.*next/.test(q)) {
-      return `class Node:\n    def __init__(self, data):\n        self.data = data\n        self.next = None\n\nclass LinkedList:\n    def __init__(self):\n        self.head = None\n\n    def append(self, data):\n        new_node = Node(data)\n        if not self.head:\n            self.head = new_node\n            return\n        curr = self.head\n        while curr.next:\n            curr = curr.next\n        curr.next = new_node\n\n    def display(self):\n        curr = self.head\n        while curr:\n            print(curr.data, end=" -> ")\n            curr = curr.next\n        print("None")\n\n# Usage:\nll = LinkedList()\nll.append(10)\nll.append(20)\nll.display()  # 10 -> 20 -> None`;
+      return `class Node:
+    def __init__(self, data):
+        self.data = data
+        self.next = None
+
+class LinkedList:
+    def __init__(self):
+        self.head = None
+
+    def append(self, data):
+        new_node = Node(data)
+        if not self.head:
+            self.head = new_node
+            return
+        curr = self.head
+        while curr.next:
+            curr = curr.next
+        curr.next = new_node
+
+    def display(self):
+        curr = self.head
+        while curr:
+            print(curr.data, end=" -> ")
+            curr = curr.next
+        print("None")
+
+# Usage:
+ll = LinkedList()
+ll.append(10)
+ll.append(20)
+ll.display()  # 10 -> 20 -> None`;
     }
     if (/implement.*(dict|dictionary|hash ?map)|how.*(dict|dictionary).*implemented/.test(q)) {
-      return `class SimpleHashMap:\n    """Basic hash table implementation demonstrating open addressing / chaining."""\n    def __init__(self, size=16):\n        self.size = size\n        self.buckets = [[] for _ in range(size)]\n\n    def _hash(self, key):\n        return hash(key) % self.size\n\n    def set(self, key, value):\n        idx = self._hash(key)\n        for i, (k, v) in enumerate(self.buckets[idx]):\n            if k == key:\n                self.buckets[idx][i] = (key, value)\n                return\n        self.buckets[idx].append((key, value))\n\n    def get(self, key, default=None):\n        idx = self._hash(key)\n        for k, v in self.buckets[idx]:\n            if k == key:\n                return v\n        return default\n\n# Usage:\nd = SimpleHashMap()\nd.set("python", 3.12)\nprint(d.get("python"))  # 3.12`;
+      return `class SimpleHashMap:
+    """Basic hash table implementation demonstrating chaining."""
+    def __init__(self, size=16):
+        self.size = size
+        self.buckets = [[] for _ in range(size)]
+
+    def _hash(self, key):
+        return hash(key) % self.size
+
+    def set(self, key, value):
+        idx = self._hash(key)
+        for i, (k, v) in enumerate(self.buckets[idx]):
+            if k == key:
+                self.buckets[idx][i] = (key, value)
+                return
+        self.buckets[idx].append((key, value))
+
+    def get(self, key, default=None):
+        idx = self._hash(key)
+        for k, v in self.buckets[idx]:
+            if k == key:
+                return v
+        return default
+
+# Usage:
+d = SimpleHashMap()
+d.set("python", 3.12)
+print(d.get("python"))  # 3.12`;
     }
     if (/dict|key.?value|hash ?map/.test(q)) {
-      return `user_scores = {"ana": 92, "ben": 85}\nuser_scores["cara"] = 90\n\naverage = sum(user_scores.values()) / len(user_scores)\nprint(f"Average: {average:.1f}")\nprint(user_scores.get("dan", "not found"))`;
+      return `user_scores = {"ana": 92, "ben": 85}
+user_scores["cara"] = 90
+
+average = sum(user_scores.values()) / len(user_scores)
+print(f"Average: {average:.1f}")
+print(user_scores.get("dan", "not found"))`;
     }
     if (/list|tuple/.test(q)) {
-      return `items = [3, 1, 2]\nitems.append(4)\ncoords = (10, 20)\n\nfor item in sorted(items):\n    print(item)\nprint(f"Point: {coords[0]}, {coords[1]}")`;
+      return `items = [3, 1, 2]
+items.append(4)
+coords = (10, 20)
+
+for item in sorted(items):
+    print(item)
+print(f"Point: {coords[0]}, {coords[1]}")`;
     }
     if (/dataset|dataframe|pandas|csv/.test(q)) {
-      return `import pandas as pd\n\ndf = pd.read_csv("data.csv")\ndf = df.dropna()\nprint(df.head())\nprint(df.describe())`;
+      return `import pandas as pd
+
+df = pd.read_csv("data.csv")
+df = df.dropna()
+print(df.head())
+print(df.describe())`;
     }
     if (/async|await|event loop/.test(q)) {
-      return `import asyncio\nimport httpx\n\nasync def fetch_titles(urls: list[str]) -> list[str]:\n    async with httpx.AsyncClient() as client:\n        results = []\n        for url in urls:\n            response = await client.get(url)\n            results.append(response.text[:100])\n        return results`;
+      return `import asyncio
+import httpx
+
+async def fetch_titles(urls: list[str]) -> list[str]:
+    async with httpx.AsyncClient() as client:
+        results = []
+        for url in urls:
+            response = await client.get(url)
+            results.append(response.text[:100])
+        return results`;
     }
     if (/api|rest|http|flask|fastapi/.test(q)) {
-      return `from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get("/users/{user_id}")\ndef get_user(user_id: int):\n    return {"user_id": user_id, "name": "Ana"}`;
+      return `from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/users/{user_id}")
+def get_user(user_id: int):
+    return {"user_id": user_id, "name": "Ana"}`;
     }
     // Generic fallback: exact runnable Python, no paragraph wrapper.
-    return `def solve(items: list[int]) -> list[int]:\n    seen: dict[int, int] = {}\n    result: list[int] = []\n    for item in items:\n        if item not in seen:\n            seen[item] = 1\n            result.append(item)\n    return result\n\n\nif __name__ == "__main__":\n    print(solve([3, 1, 2, 1, 3]))`;
+    return `def solve(items: list[int]) -> list[int]:
+    seen: dict[int, int] = {}
+    result: list[int] = []
+    for item in items:
+        if item not in seen:
+            seen[item] = 1
+            result.append(item)
+    return result
+
+
+if __name__ == "__main__":
+    print(solve([3, 1, 2, 1, 3]))`;
   }
   if (language === "sql") {
-    return `SELECT department, AVG(salary) AS avg_salary\nFROM employees\nWHERE active = TRUE\nGROUP BY department\nORDER BY avg_salary DESC;`;
+    return `SELECT department, AVG(salary) AS avg_salary
+FROM employees
+WHERE active = TRUE
+GROUP BY department
+ORDER BY avg_salary DESC;`;
   }
   if (language === "javascript") {
-    return `function unique(items) {\n  return [...new Set(items)];\n}\n\nconsole.log(unique([3, 1, 2, 1, 3]));`;
+    if (/palindrome/.test(q)) {
+      return `function isPalindrome(str) {
+  const clean = str.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return clean === clean.split("").reverse().join("");
+}
+
+console.log(isPalindrome("racecar")); // true`;
+    }
+    return `function unique(items) {
+  return [...new Set(items)];
+}
+
+console.log(unique([3, 1, 2, 1, 3]));`;
   }
-  return `public class Main {\n  public static void main(String[] args) {\n    System.out.println("Hello");\n  }\n}`;
+  return `public class Main {
+  public static void main(String[] args) {
+    System.out.println("Hello");
+  }
+};`;
 }
 
 function stripPointers(text: string): string {

@@ -36,6 +36,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
   const [contextOpen, setContextOpen] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(true);
   const [transcriptOpen, setTranscriptOpen] = useState(true);
+  const [isLocked, setIsLocked] = useState(false);
   const [readerSpeech, setReaderSpeech] = useState<ReaderSpeech | null>(null);
   const [readerCompletion, setReaderCompletion] = useState<ReaderCompletion | null>(null);
   const controller = useRef<LiveController | null>(null);
@@ -139,7 +140,34 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
 
     <section ref={answerPane} id="live-answer-pane" className="live-answer-region answer-panel" aria-label="Suggested answer" tabIndex={0}>
       <div className="answer-body">{state.answer ? <>
-        <div className="answer-label"><span className="status-dot" /> SUGGESTED ANSWER{state.answering && <span className="streaming-label">Composing…</span>}</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px", flexWrap: "wrap", gap: "6px" }}>
+          <div className="answer-label"><span className="status-dot" /> SUGGESTED ANSWER{state.answering && <span className="streaming-label">Composing…</span>}</div>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !isLocked;
+              setIsLocked(next);
+              controller.current?.setAnswerLocked(next);
+            }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              padding: "3px 10px",
+              fontSize: "11px",
+              borderRadius: "9999px",
+              cursor: "pointer",
+              border: isLocked ? "1px solid #10b981" : "1px solid #374151",
+              background: isLocked ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.05)",
+              color: isLocked ? "#34d399" : "#9ca3af",
+              fontWeight: 600,
+              transition: "all 0.15s ease"
+            }}
+            title={isLocked ? "Click to unlock and allow new questions" : "Click to lock this answer on screen while reading"}
+          >
+            {isLocked ? "🔒 Locked (Reading)" : "🔓 Keep answer"}
+          </button>
+        </div>
         <AnswerReader key={state.generation || "stopped"} answer={state.answer} generation={state.generation} active={state.phase === "listening"} visible={visible} completion={readerCompletion} speech={readerSpeech} preferences={user.preferences} containerRef={answerPane} />
       </> : <div className="answer-empty"><span className={`answer-empty-icon ${active ? "pulse" : ""}`}><AudioLines size={40} strokeWidth={1.3} /></span><h3>{state.answering ? "Connecting your evidence…" : active ? "Present, listening, ready." : "Room for your next great answer."}</h3><p>{state.answering ? "A response will appear here as it is generated." : "Your suggested answer will appear here when a spoken question is detected."}</p></div>}</div>
     </section>

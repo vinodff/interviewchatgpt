@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const doubles = vi.hoisted(() => ({ api: vi.fn(), captureStart: vi.fn(), captureStop: vi.fn(), onAudio: null as null | ((packet: ArrayBuffer) => void) }));
 vi.mock("../lib/api", async importOriginal => ({ ...await importOriginal<typeof import("../lib/api")>(), api: doubles.api }));
 vi.mock("../lib/capture", () => ({ AudioCapture: class { ready = Promise.resolve(); constructor(_mode: string, audio: (packet: ArrayBuffer) => void) { doubles.captureStart(); doubles.onAudio = audio; } stop() { doubles.captureStop(); } } }));
-import { LiveController, mergeUtterances, cleanQuestion } from "../lib/live-controller";
-import { findMatchingTopic } from "../lib/knowledge-engine";
+import { LiveController, mergeUtterances, cleanQuestion, isLikelyQuestion } from "../lib/live-controller";
+import { findMatchingTopic, generateHumanAnswer, isCodeRequest } from "../lib/knowledge-engine";
 import { ApiError } from "../lib/api";
 
 class Socket {
@@ -185,6 +185,38 @@ describe("smart utterance deduplication and question cleaning", () => {
     const dictTopic = findMatchingTopic("so how can you implement the dictionary in Python");
     expect(dictTopic).not.toBeNull();
     expect(dictTopic?.title).toBe("Python Dictionary");
+  });
+
+  it("isLikelyQuestion correctly identifies real interview questions and rejects candidate explanations", () => {
+    // Real questions
+    expect(isLikelyQuestion("can you write python code for palindrome?", "can you write python code for palindrome?")).toBe(true);
+    expect(isLikelyQuestion("how do you implement binary search", "how do you implement binary search")).toBe(true);
+    expect(isLikelyQuestion("what is the difference between list and tuple", "what is the difference between list and tuple")).toBe(true);
+    expect(isLikelyQuestion("write code for palindrome", "write code for palindrome")).toBe(true);
+    expect(isLikelyQuestion("palindrome in python", "palindrome in python")).toBe(true);
+
+    // Candidate reading aloud / explaining - MUST BE REJECTED to prevent overwriting answers!
+    expect(isLikelyQuestion("In Python, a dictionary is like a real-world dictionary", "In Python a dictionary is like a real-world dictionary")).toBe(false);
+    expect(isLikelyQuestion("I use a Python dictionary when I need O(1) lookups", "I use a Python dictionary when I need O(1) lookups")).toBe(false);
+    expect(isLikelyQuestion("We can clean the string and check if it equals its reverse slice", "We can clean the string and check if it equals its reverse slice")).toBe(false);
+    expect(isLikelyQuestion("Basically, for example here is how I would explain it", "Basically for example here is how I would explain it")).toBe(false);
+  });
+
+  it("generates simple, clean, explainable palindrome code with clean == clean[::-1]", () => {
+    expect(isCodeRequest("write python code for palindrome")).toBe(true);
+    expect(isCodeRequest("palindrome")).toBe(true);
+
+    const result = generateHumanAnswer("write python code for palindrome", "Software Engineer", { response_delivery: "natural" });
+    expect(result.answer).toContain("```python");
+    expect(result.answer).toContain("clean == clean[::-1]");
+    expect(result.answer).toContain("def is_palindrome");
+  });
+
+  it("matches the Palindrome topic in the knowledge engine", () => {
+    const topic = findMatchingTopic("can you explain palindrome in python");
+    expect(topic).not.toBeNull();
+    expect(topic?.title).toBe("Palindrome in Python");
+    expect(topic?.simple).toContain("clean == clean[::-1]");
   });
 });
 
