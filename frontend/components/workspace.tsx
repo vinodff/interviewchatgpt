@@ -3,12 +3,13 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CS
 import { ArrowRight, AudioLines, BookOpen, Check, ChevronRight, Clock3, CreditCard, FileText, Folder, LayoutDashboard, LogOut, Menu, Radio, RefreshCw, ShieldCheck, UserRound, X } from "lucide-react";
 import { api, ApiError, formatDate, messageOf, post } from "@/lib/api";
 import type { Health, Project, Session, Source, User } from "@/lib/types";
-import { Auth, Brand } from "./auth";
+import { Brand } from "./auth";
 import { Alert, Button, Empty, SectionHeader } from "./ui";
 import { Library } from "./library";
 import { History } from "./history";
 import { Profile, Billing } from "./settings";
 import { LivePanel } from "./live-panel";
+import { getStoredHealth, getStoredProjects, getStoredSessions, getStoredSources, getStoredUser } from "@/lib/browser-storage";
 
 type Page = "overview" | "live" | "library" | "history" | "profile" | "billing";
 const mobileQuery = "(max-width:760px)";
@@ -22,8 +23,49 @@ const navigation = [
   { id: "billing", label: "Plan & billing", icon: CreditCard },
 ] as const;
 
+const DEFAULT_TEST_USER: User = {
+  id: "test-user",
+  email: "candidate@workspace.local",
+  name: "Candidate",
+  plan: "free",
+  github_username: "",
+  github_verified: false,
+  profile: {
+    "Target Focus": "Software Engineering & Technical Leadership",
+    "Testing Mode": "Active (Zero Login Required)",
+    "Notice": "Workspace is running in instant testing mode without sign in."
+  },
+  preferences: {
+    role: "Senior Software Engineer",
+    company: "",
+    language: "English",
+    answer_style: "concise",
+    answer_tone: "professional",
+    grounding: "balanced",
+    english_level: "everyday",
+    reading_mode: "auto",
+    reading_wpm: 155,
+    response_delivery: "natural",
+    personalization: "grounded",
+    answer_text_size: 17,
+    answer_font: "system",
+    answer_theme: "default"
+  },
+  minutes_used: 0,
+  minute_limit: null,
+  testing_mode: true
+};
+
+function getInitialUser(): User {
+  try {
+    return getStoredUser();
+  } catch {
+    return DEFAULT_TEST_USER;
+  }
+}
+
 export function Workspace() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User>(getInitialUser);
   const [initial, setInitial] = useState(true);
   const [page, setPage] = useState<Page>("overview");
   const [menu, setMenu] = useState(false);
@@ -55,34 +97,78 @@ export function Workspace() {
     const request = new AbortController(); dataRequest.current = request;
     refreshInFlight.current = true;
     setLoading(true);
-    const results = await Promise.allSettled([api<Project[]>("/projects", { signal: request.signal }), api<Source[]>("/sources", { signal: request.signal }), api<Session[]>("/sessions", { signal: request.signal }), api<User>("/auth/me", { signal: request.signal }), api<Health>("/health", { signal: request.signal })]);
+    const results = await Promise.allSettled([
+      api<Project[]>("/projects", { signal: request.signal }),
+      api<Source[]>("/sources", { signal: request.signal }),
+      api<Session[]>("/sessions", { signal: request.signal }),
+      api<User>("/auth/me", { signal: request.signal }),
+      api<Health>("/health", { signal: request.signal })
+    ]);
     if (dataRequest.current === request) refreshInFlight.current = false;
     if (request.signal.aborted || epoch !== authEpoch.current) return;
-    if (results.some(result => result.status === "rejected" && result.reason instanceof ApiError && result.reason.status === 401)) {
-      authEpoch.current++; setAuthVersion(authEpoch.current); request.abort(); identity.current = null;
-      setUser(null); setProjects([]); setSources([]); setSessions([]); setLoading(false); setMenu(false); setActive(false); return;
+
+    if (results[0].status === "fulfilled") {
+      setProjects(results[0].value);
+    } else {
+      try { setProjects(getStoredProjects()); } catch { /* ignore */ }
     }
-    const me = results[3];
-    if (me.status === "fulfilled" && me.value.id !== identity.current) {
-      authEpoch.current++; setAuthVersion(authEpoch.current); identity.current = me.value.id; setProjects([]); setSources([]); setSessions([]); setNotice("");
+
+    if (results[1].status === "fulfilled") {
+      setSources(results[1].value);
+    } else {
+      try { setSources(getStoredSources()); } catch { /* ignore */ }
     }
-    const setters = [setProjects, setSources, setSessions, setUser, setHealth];
+
+    if (results[2].status === "fulfilled") {
+      setSessions(results[2].value);
+    } else {
+      try { setSessions(getStoredSessions()); } catch { /* ignore */ }
+    }
+
+    if (results[3].status === "fulfilled") {
+      const me = results[3].value;
+      if (me.id !== identity.current) {
+        authEpoch.current++; setAuthVersion(authEpoch.current); identity.current = me.id; setNotice("");
+      }
+      setUser(me);
+    } else {
+      setUser(prev => prev || getInitialUser());
+    }
+
+    if (results[4].status === "fulfilled") {
+      setHealth(results[4].value);
+    } else {
+      try { setHealth(getStoredHealth()); } catch { /* ignore */ }
+    }
+
     let failure = "";
-    results.forEach((result, index) => {
-      if (result.status === "fulfilled") {
-        // Each request and setter share the ordered contract above.
-        (setters[index] as (value: unknown) => void)(result.value);
-      } else { failure = messageOf(result.reason); }
+    results.forEach(result => {
+      if (result.status === "rejected") {
+        const reason = result.reason;
+        const isAuthOrOffline = reason instanceof ApiError && (reason.status === 401 || reason.status === 0 || reason.status >= 500);
+        if (!isAuthOrOffline) failure = messageOf(reason);
+      }
     });
     setError(failure); setLoading(false);
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    api<User>("/auth/me", { signal: controller.signal }).then(value => { identity.current = value.id; setUser(value); void refresh(); }).catch(error => {
-      if (!(error instanceof ApiError && error.status === 401) && !controller.signal.aborted) setError(messageOf(error));
-    }).finally(() => { if (!controller.signal.aborted) setInitial(false); });
-    return () => { controller.abort(); dataRequest.current?.abort(); };
+    const timer = setTimeout(() => { controller.abort(); }, 1500);
+    api<User>("/auth/me", { signal: controller.signal }).then(value => {
+      identity.current = value.id;
+      setUser(value);
+      void refresh();
+    }).catch(() => {
+      const testUser = getInitialUser();
+      identity.current = testUser.id;
+      setUser(testUser);
+      void refresh();
+    }).finally(() => {
+      clearTimeout(timer);
+      setInitial(false);
+    });
+    return () => { clearTimeout(timer); controller.abort(); dataRequest.current?.abort(); };
   }, [refresh]);
   useEffect(() => {
     if (!menu || !mobile) return;
@@ -117,11 +203,12 @@ export function Workspace() {
   function closeMenu() { setMenu(false); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[aria-label="Open navigation"]')?.focus()); }
   function updateUser(value: User | null) {
     authEpoch.current++; setAuthVersion(authEpoch.current); dataRequest.current?.abort();
-    if (value === null || value.id !== identity.current) {
+    const nextUser = value || getInitialUser();
+    if (nextUser.id !== identity.current) {
       setProjects([]); setSources([]); setSessions([]); setNotice(""); setMenu(false); setActive(false);
     }
-    identity.current = value?.id || null;
-    setUser(value);
+    identity.current = nextUser.id;
+    setUser(nextUser);
   }
   async function logout() {
     if (authTransition.current) return;
@@ -129,12 +216,16 @@ export function Workspace() {
     authEpoch.current++;
     setAuthVersion(authEpoch.current);
     dataRequest.current?.abort();
-    try { await api("/auth/logout", post()); updateUser(null); setPage("overview"); }
-    catch (error) { setError(messageOf(error)); }
-    finally { authTransition.current = false; setLoading(false); }
+    try { await api("/auth/logout", post()); }
+    catch { /* ignore logout failure */ }
+    finally {
+      authTransition.current = false;
+      setLoading(false);
+      updateUser(getInitialUser());
+      setPage("overview");
+    }
   }
   if (initial) return <main className="initial-loader"><Brand /><AudioLines size={30} className="pulse" /><p>Opening your workspace…</p></main>;
-  if (!user) return <Auth serviceError={error} onAuthenticated={value => { setError(""); updateUser(value); void refresh(); }} />;
   const visibleNavigation = user.testing_mode ? navigation.filter(item => item.id !== "billing") : navigation;
   const ready = sources.filter(source => source.status === "ready").length;
   const renderEpoch = authVersion;

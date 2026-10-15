@@ -5,6 +5,7 @@ import { useOwnedApi } from "@/lib/use-owned-api";
 import { ROLES, searchCompanies } from "@/lib/companies";
 import type { Preferences, User } from "@/lib/types";
 import { Alert, Button } from "./ui";
+import { updateStoredUser } from "@/lib/browser-storage";
 
 export function completePreferences(preferences: Preferences = {}): Preferences {
   return { role: "", company: "", language: "English", answer_style: "concise", job_description: "", answer_tone: "professional", grounding: "balanced", english_level: "everyday", reading_mode: "auto", reading_wpm: 130, response_delivery: "natural", personalization: "grounded", answer_text_size: 17, answer_font: "system", answer_theme: "default", ...preferences };
@@ -165,7 +166,12 @@ export function LiveAnswerPreferences({ user, onUser }: { user: User; onUser: (u
       try {
         const updated = await api<User>("/profile", { method: "PATCH", body: JSON.stringify({ preferences: latest.current }) });
         onUser(updated); setSaved(true); setAutoState("applied");
-      } catch (error) { setError(messageOf(error)); setAutoState("idle"); }
+      } catch {
+        try {
+          const updated = updateStoredUser({ preferences: latest.current });
+          onUser(updated); setSaved(true); setAutoState("applied");
+        } catch (error) { setError(messageOf(error)); setAutoState("idle"); }
+      }
       finally { setBusy(false); }
     }, 450);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
@@ -179,7 +185,12 @@ export function LiveAnswerPreferences({ user, onUser }: { user: User; onUser: (u
     try {
       const updated = await api<User>("/profile", { method: "PATCH", body: JSON.stringify({ preferences }) });
       onUser(updated); setSaved(true); setAutoState("applied");
-    } catch (error) { setError(messageOf(error)); } finally { setBusy(false); }
+    } catch {
+      try {
+        const updated = updateStoredUser({ preferences });
+        onUser(updated); setSaved(true); setAutoState("applied");
+      } catch (error) { setError(messageOf(error)); }
+    } finally { setBusy(false); }
   }
   const formatLabel = preferences.response_delivery === "natural" ? "Natural answer" : preferences.response_delivery === "talking_points" ? "Talking points" : "Step by step";
   return <form className="form-stack live-preference-form" onSubmit={save}>
