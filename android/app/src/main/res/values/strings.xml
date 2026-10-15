@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">InterviewPilot Live</string>
+    <string name="connection_title">Connect your workspace</string>
+    <string name="connection_help">Use your hosted HTTPS address. For USB testing, run the Android connection script on your PC and use http://localhost:3001.</string>
+    <string name="connection_privacy">Your server processes audio with Gemini. Raw audio is never saved. Use only with everyone’s permission. Microphone access stops when you leave the app.</string>
+    <string name="connect">Open workspace</string>
+    <string name="server_address">Workspace address</string>
+    <string name="connection_settings">Connection settings</string>
+    <string name="connection_error">Could not reach your workspace. Keep the PC service running and connect with USB, or enter a hosted HTTPS address.</string>
+    <string name="url_error">Enter an HTTPS website address without a path, query, or password. This test build also accepts http://localhost:3001 over USB.</string>
+    <string name="microphone_denied">Microphone permission was denied. Enable it in Android app permissions, then start again.</string>
+    <string name="open_external">Open external website?</string>
+    <string name="browser_unavailable">No browser is available to open that link.</string>
+    <string name="file_picker_unavailable">No document picker is available on this device.</string>
+    <string name="close_title">Leave your workspace?</string>
+    <string name="close_message">Leaving stops microphone capture. You can also change the server address.</string>
+    <string name="stay">Stay here</string>
+    <string name="close">Close app</string>
+</resources>

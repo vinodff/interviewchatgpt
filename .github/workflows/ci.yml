@@ -1,0 +1,70 @@
+name: Verify InterviewPilot
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg18-trixie
+        env:
+          POSTGRES_USER: interviewpilot
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: migration_verify
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U interviewpilot -d migration_verify"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: sqlite+aiosqlite:///./data/test-api.db
+      REDIS_URL: memory://
+      GEMINI_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run ruff check app migrations tests scripts
+      - run: uv run pytest -q
+      - name: Verify PostgreSQL migrations and schema
+        env:
+          DATABASE_URL: postgresql+asyncpg://interviewpilot:ci-only-password@127.0.0.1:5432/migration_verify
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+          uv run alembic check
+      - run: uv run pip-audit --progress-spinner off
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      BACKEND_INTERNAL_URL: http://127.0.0.1:8001
+      NEXT_PUBLIC_WS_URL: ws://localhost:8001
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm audit --omit=dev
