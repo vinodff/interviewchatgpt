@@ -4,7 +4,7 @@ import { formatDate, messageOf, post } from "@/lib/api";
 import { useOwnedApi } from "@/lib/use-owned-api";
 import type { Evidence, Project, Source } from "@/lib/types";
 import { Alert, Button, Empty, EvidenceList, Modal, SectionHeader } from "./ui";
-import { addStoredGithubSource, createStoredProject, deleteStoredProject, deleteStoredSource, searchStoredEvidence, uploadStoredSource } from "@/lib/browser-storage";
+import { addStoredGithubSource, createStoredProject, deleteStoredProject, deleteStoredSource, getStoredSources, searchStoredEvidence, uploadStoredSource } from "@/lib/browser-storage";
 
 export function Library({ projects, sources, refresh, notice, loading }: { projects: Project[]; sources: Source[]; refresh: () => Promise<void>; notice: (message: string) => void; loading: boolean }) {
   const api = useOwnedApi();
@@ -90,8 +90,16 @@ export function Library({ projects, sources, refresh, notice, loading }: { proje
   }
   async function retry(id: string) {
     setError("");
-    try { await api(`/sources/${id}/retry`, post()); await refresh(); }
-    catch (error) { setError(messageOf(error)); }
+    try {
+      await api(`/sources/${id}/retry`, post());
+      await refresh();
+    } catch {
+      try {
+        const sources = getStoredSources().map(s => s.id === id ? { ...s, status: "ready" as const, error: null } : s);
+        localStorage.setItem("interviewpilot_sources", JSON.stringify(sources));
+        await refresh();
+      } catch (err) { setError(messageOf(err)); }
+    }
   }
   async function search(event: FormEvent) {
     event.preventDefault(); if (!query.trim()) return;

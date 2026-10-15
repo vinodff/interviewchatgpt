@@ -145,8 +145,8 @@ export function Workspace() {
     results.forEach(result => {
       if (result.status === "rejected") {
         const reason = result.reason;
-        const isAuthOrOffline = reason instanceof ApiError && (reason.status === 401 || reason.status === 0 || reason.status >= 500);
-        if (!isAuthOrOffline) failure = messageOf(reason);
+        const isOfflineOrFallback = !(reason instanceof ApiError) || [0, 401, 404, 410, 500, 502, 503, 504].includes(reason.status);
+        if (!isOfflineOrFallback) failure = messageOf(reason);
       }
     });
     setError(failure); setLoading(false);
