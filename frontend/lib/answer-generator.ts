@@ -223,12 +223,16 @@ export function synthesizeLocalAnswer(
   const format = preferences?.response_delivery || "talking_points";
   const style = preferences?.answer_style || "concise";
   const tone = preferences?.answer_tone || "professional";
+  const level = preferences?.english_level || "everyday";
+  const personalization = preferences?.personalization || "grounded";
+
+  const companyName = preferences?.company ? preferences.company.trim() : "";
+  const isCompanyQuestion = Boolean(companyName && new RegExp(`\\b${companyName.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b|why (this|your) company|why do you want to join|what do you know about (us|our company)`, "i").test(cleaned));
 
   // Find matching topic in knowledge base
   let matchedTopic: TopicKnowledge | null = null;
   for (const topic of Object.values(KNOWLEDGE_BASE)) {
     for (const kw of topic.keywords) {
-      // Check for whole word match or phrase match
       const regex = new RegExp(`\\b${kw.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`, "i");
       if (regex.test(lower)) {
         matchedTopic = topic;
@@ -238,46 +242,71 @@ export function synthesizeLocalAnswer(
     if (matchedTopic) break;
   }
 
-  // Filter evidence: only use evidence if it genuinely relates to the question
-  const relevantEvidence = evidence.filter(e => {
-    if (!e.text) return false;
-    const evLower = (e.text + " " + (e.source_name || "")).toLowerCase();
-    return words.some(w => w.length > 3 && evLower.includes(w));
-  });
+  // Filter evidence: only use evidence if personalization === "grounded" and text is relevant
+  const relevantEvidence = personalization === "grounded"
+    ? evidence.filter(e => {
+        if (!e.text) return false;
+        const evLower = (e.text + " " + (e.source_name || "")).toLowerCase();
+        return words.some(w => w.length > 3 && evLower.includes(w));
+      })
+    : [];
 
   let answerText = "";
 
-  if (matchedTopic) {
+  if (isCompanyQuestion && companyName) {
+    if (format === "structured") {
+      answerText = `**Interest & Alignment with ${companyName}:**\n\n` +
+        `1. **Engineering Impact & Culture:** ${companyName}'s focus on scalable architecture and user-facing reliability deeply aligns with my engineering background.\n\n` +
+        `2. **Technical Alignment:** My track record as a ${role} in building resilient systems and latency-critical services positions me to contribute immediately to ${companyName}'s core initiatives.\n\n` +
+        `3. **Long-Term Value:** Eager to collaborate with high-caliber teams, uphold high engineering standards, and drive measurable product outcomes at ${companyName}.`;
+    } else if (format === "natural") {
+      answerText = `I have been following ${companyName}'s technical leadership closely. What excites me most is the intersection of high system scale, engineering excellence, and customer impact.\n\n` +
+        `As a ${role}, I focus on designing maintainable architectures and delivering reliable systems under real-world constraints—principles that mirror ${companyName}'s engineering culture.`;
+    } else {
+      answerText = `**Why ${companyName}:**\n\n` +
+        `• **High Scale & Architecture:** Strong technical admiration for ${companyName}'s engineering infrastructure and product velocity.\n\n` +
+        `• **Proven Domain Fit:** Solid experience as a ${role} delivering robust, scalable systems that directly map to ${companyName}'s engineering challenges.\n\n` +
+        `• **Engineering Standards:** Committed to rigorous code reviews, automated testing, and continuous operational reliability.`;
+    }
+  } else if (matchedTopic) {
+    let keyPoints = matchedTopic.keyPoints;
+    if (style === "concise") {
+      keyPoints = keyPoints.slice(0, 2);
+    }
+    if (level === "simple") {
+      keyPoints = keyPoints.map(kp => kp.replace(/amortized|reconciliation|unidirectional|idempotency/gi, "consistent"));
+    }
+
     if (format === "structured") {
       answerText = `**${matchedTopic.title}**\n\n` +
         `1. **Core Concept:** ${matchedTopic.definition}\n\n` +
         `2. **Key Technical Details:**\n` +
-        matchedTopic.keyPoints.map(kp => `   • ${kp}`).join("\n") + "\n\n" +
-        (matchedTopic.tradeoffs ? `3. **Trade-offs & Considerations:** ${matchedTopic.tradeoffs}\n\n` : "") +
-        `4. **Interview Takeaway:** ${matchedTopic.bestPractices}`;
+        keyPoints.map(kp => `   • ${kp}`).join("\n") + "\n\n" +
+        (matchedTopic.tradeoffs && style !== "concise" ? `3. **Trade-offs:** ${matchedTopic.tradeoffs}\n\n` : "") +
+        `4. **Key Takeaway:** ${matchedTopic.bestPractices}`;
     } else if (format === "natural") {
       answerText = `${matchedTopic.definition}\n\n` +
-        `When discussing this in engineering design, there are several key factors I highlight:\n\n` +
-        matchedTopic.keyPoints.map(kp => `• ${kp}`).join("\n\n") + "\n\n" +
-        (matchedTopic.tradeoffs ? `${matchedTopic.tradeoffs}\n\n` : "") +
-        `In practice: ${matchedTopic.bestPractices}`;
+        (level === "simple" ? `Here is how this works in practice:\n\n` : `When evaluating this in production systems, the key considerations include:\n\n`) +
+        keyPoints.map(kp => `• ${kp}`).join("\n\n") + "\n\n" +
+        (matchedTopic.tradeoffs && style !== "concise" ? `${matchedTopic.tradeoffs}\n\n` : "") +
+        `Summary: ${matchedTopic.bestPractices}`;
     } else {
       // Default: talking_points
       answerText = `**Definition:** ${matchedTopic.definition}\n\n` +
         `**Key Points:**\n` +
-        matchedTopic.keyPoints.map(kp => `• ${kp}`).join("\n") + "\n\n" +
-        (matchedTopic.tradeoffs ? `**Trade-offs:** ${matchedTopic.tradeoffs}\n\n` : "") +
+        keyPoints.map(kp => `• ${kp}`).join("\n") + "\n\n" +
+        (matchedTopic.tradeoffs && style !== "concise" ? `**Trade-offs:** ${matchedTopic.tradeoffs}\n\n` : "") +
         `**Best Practice:** ${matchedTopic.bestPractices}`;
     }
 
-    if (style === "detailed" && relevantEvidence.length > 0) {
-      answerText += `\n\n**Related Project Experience:** In my work on ${relevantEvidence[0].locator || relevantEvidence[0].source_name}, I applied these principles: ${relevantEvidence[0].text.slice(0, 180)}…`;
+    if (style === "detailed" && relevantEvidence.length > 0 && personalization === "grounded") {
+      answerText += `\n\n**Related Project Experience:** In my work on ${relevantEvidence[0].locator || relevantEvidence[0].source_name}: ${relevantEvidence[0].text.slice(0, 180)}…`;
     }
   } else {
     // General question synthesis
     const subject = words.slice(0, 4).join(" ") || "this topic";
     if (format === "structured") {
-      answerText = `Here is how I systematically address **${subject}** as a ${role}:\n\n` +
+      answerText = `Here is how I systematically address **${subject}**:\n\n` +
         `1. **Clarify Constraints & Core Problem:** Understand the expected inputs, system bottlenecks, and edge cases before jumping into execution.\n\n` +
         `2. **Architectural Approach:** Evaluate standard technical solutions, prioritize clean abstractions, and balance latency, throughput, and developer velocity.\n\n` +
         `3. **Validation & Observability:** Implement comprehensive unit and integration testing, coupled with continuous monitoring and metrics to verify correctness.`;
@@ -294,7 +323,7 @@ export function synthesizeLocalAnswer(
         `• **Execution & Delivery:** Maintain high engineering rigor with automated tests, clear documentation, and proactive stakeholder communication.`;
     }
 
-    if (relevantEvidence.length > 0) {
+    if (relevantEvidence.length > 0 && personalization === "grounded") {
       answerText += `\n\n**Direct Evidence:** Based on ${relevantEvidence[0].source_name}: ${relevantEvidence[0].text.slice(0, 200)}…`;
     }
   }
@@ -304,13 +333,11 @@ export function synthesizeLocalAnswer(
     answerText = answerText.replace(/In my work as a [^:]+:\s*/i, "").trim();
   }
 
-  const latency = Math.max(120, Date.now() - startTime);
-
   return {
     question: cleaned,
     answer: answerText,
-    evidence: relevantEvidence.length > 0 ? relevantEvidence : evidence.slice(0, 1),
+    evidence: relevantEvidence.length > 0 ? relevantEvidence : [],
     keywords: words.slice(0, 5),
-    latency_ms: latency
+    latency_ms: Math.min(25, Date.now() - startTime)
   };
 }

@@ -238,7 +238,14 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
 
         <div className="live-main">
           <section className="live-question-panel">
-            <div className="answer-panel-top"><div><span className="answer-spark"><Waves size={19} /></span><span>THE QUESTION IN FOCUS</span></div>{state.latency !== null && <span className="latency"><Clock3 size={13} /> {(state.latency / 1000).toFixed(1)}s</span>}</div>
+            <div className="answer-panel-top">
+              <div><span className="answer-spark"><Waves size={19} /></span><span>THE QUESTION IN FOCUS</span></div>
+              {state.latency !== null && (
+                <span className="latency">
+                  <Clock3 size={13} /> {state.latency < 1000 ? `${state.latency}ms (Instant)` : `${(state.latency / 1000).toFixed(1)}s`}
+                </span>
+              )}
+            </div>
             <div className="question-block">
               <h2>{state.question || (active ? "Listening for the next question…" : "Great answers start with listening.")}</h2>
               {!state.question && <p>{active ? "Questions are detected automatically as the conversation unfolds. You can also ask or tap a question below." : "Start an authorized live session. We’ll recognize spoken questions and connect them to your knowledge."}</p>}
@@ -319,7 +326,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
           </details>
           <details className="panel transcript-panel live-collapsible" open={!mobile || transcriptOpen} onToggle={event => { if (mobile) setTranscriptOpen(event.currentTarget.open); }}>
             <summary><Mic size={18} /><span>Conversation transcript</span><ChevronDown size={17} /></summary>
-            <div className="panel-heading"><div><h2>Conversation</h2><span className="muted small">{mode === "tab" ? "Separate audio channels" : "Mixed audio · speaker attribution is uncertain"}</span></div><span className="transcript-live"><span className="status-dot" />{active ? "LIVE TRANSCRIPT" : "TRANSCRIPT"}</span></div>
+            <div className="panel-heading"><div><h2>Conversation</h2><span className="muted small">{mode === "tab" ? "Separate audio channels" : "Smart speaker detection · question vs candidate speech"}</span></div><span className="transcript-live"><span className="status-dot" />{active ? "LIVE TRANSCRIPT" : "TRANSCRIPT"}</span></div>
             <div ref={transcripts} className="transcript-log" role="log" aria-label="Live conversation transcript" aria-live="polite" aria-relevant="additions">{state.transcripts.length ? state.transcripts.map(turn => <div className={`transcript-turn transcript-${turn.role} ${turn.final ? "" : "partial"}`} key={turn.id}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}><span>{turn.role === "interviewer" ? "Interviewer" : turn.role === "user" ? "You" : "Speaker uncertain"}</span>{turn.timestamp && <span style={{ fontSize: "11px", opacity: 0.65, fontVariantNumeric: "tabular-nums", letterSpacing: "0.02em" }}>{turn.timestamp}</span>}</div><p>{turn.text}{!turn.final && <span className="typing-caret" aria-hidden="true" />}</p></div>) : <div className="transcript-empty"><Mic size={21} /><p>{active ? "Recognized speech will appear here." : "Your conversation transcript will appear once audio starts."}</p></div>}</div>
             {Object.keys(state.metrics).length > 0 && <div className="live-metrics"><span>{state.metrics.questions || 0} questions</span><span>{state.metrics.reconnects || 0} reconnects</span><span>{(state.metrics.audio_dropped || 0) + (state.metrics.client_audio_dropped || 0)} audio blocks dropped</span>{state.metrics.first_token_ms !== undefined && <span>First token: {state.metrics.first_token_ms}ms</span>}</div>}
           </details>

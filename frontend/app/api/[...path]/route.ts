@@ -10,43 +10,85 @@ async function generateAnswerWithGemini(
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
-  const role = typeof preferences.role === "string" ? preferences.role : "Senior Software Engineer";
-  const company = typeof preferences.company === "string" && preferences.company ? ` at ${preferences.company}` : "";
+  const role = typeof preferences.role === "string" && preferences.role ? preferences.role : "Senior Software Engineer";
   const format = typeof preferences.response_delivery === "string" ? preferences.response_delivery : "talking_points";
   const level = typeof preferences.english_level === "string" ? preferences.english_level : "everyday";
   const tone = typeof preferences.answer_tone === "string" ? preferences.answer_tone : "professional";
   const style = typeof preferences.answer_style === "string" ? preferences.answer_style : "concise";
+  const personalization = typeof preferences.personalization === "string" ? preferences.personalization : "grounded";
 
-  const relevantEvidence = evidence.filter(e => e.text && e.text.length > 20).slice(0, 2);
+  const companyName = typeof preferences.company === "string" ? preferences.company.trim() : "";
+  const isCompanyQuestion = Boolean(companyName && new RegExp(`\\b${companyName.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b|why (this|your) company|why do you want to join|what do you know about (us|our company)`, "i").test(question));
+
+  const relevantEvidence = personalization === "grounded"
+    ? evidence.filter(e => e.text && e.text.length > 20).slice(0, 2)
+    : [];
+
   const evidencePrompt = relevantEvidence.length > 0
-    ? `\nCandidate Source Material (use only if directly relevant):\n` + relevantEvidence.map(e => `- [${e.source_name || "Evidence"}]: ${e.text}`).join("\n")
+    ? `\nCandidate Resume & Portfolio Evidence (ground answer in this experience where appropriate):\n` + relevantEvidence.map(e => `- [${e.source_name || "Evidence"}]: ${e.text}`).join("\n")
     : "";
 
-  const prompt = `You are an expert real-time AI interview co-pilot helping a candidate during a live technical or behavioral interview.
+  const companyInstruction = isCompanyQuestion
+    ? `Target Company: The interviewer specifically asked about "${companyName}". Address why the candidate wants to work at ${companyName} and how their background aligns with ${companyName}'s mission.`
+    : companyName
+      ? `CRITICAL COMPANY RULE: The question does NOT ask about "${companyName}". You MUST NOT mention "${companyName}" or say "at ${companyName}". Keep the answer focused strictly on the technical topic and candidate experience without mentioning the company name.`
+      : "";
+
+  const formatInstruction = format === "structured"
+    ? "Format: Step-by-step numbered points (1. Core Concept, 2. Technical Details, 3. Trade-offs / Architecture)."
+    : format === "natural"
+      ? "Format: Natural, spoken conversational answer (1-2 crisp, flowing paragraphs as if speaking directly to the interviewer)."
+      : "Format: Talking points (2-4 punchy bullet points with bold keywords).";
+
+  const levelInstruction = level === "simple"
+    ? "English Level: Simple, everyday English. Explain clearly without unnecessary complex academic jargon."
+    : level === "advanced"
+      ? "English Level: Advanced, rigorous engineering terminology. Use precise computer science vocabulary and architectural terms."
+      : "English Level: Everyday natural engineering English.";
+
+  const lengthInstruction = style === "concise"
+    ? "Length: Short and concise (under 120 words). High signal, zero filler."
+    : style === "detailed"
+      ? "Length: Detailed (250-320 words). Include implementation trade-offs, edge cases, and architectural considerations."
+      : "Length: Balanced (160-220 words).";
+
+  const prompt = `You are an expert real-time AI interview co-pilot helping a candidate during a live interview.
 Provide an immediate, exact, and direct answer to the interviewer's question.
 
 Question: "${question}"
-Candidate Role: ${role}${company}
-Format Style: ${format} (talking_points = clean bullet points; step_by_step = numbered 1, 2, 3; natural = concise spoken response)
-English Level: ${level}
+Candidate Role: ${role}
 Tone: ${tone}
-Length Style: ${style} (concise = 2-4 punchy high-signal points; detailed = comprehensive breakdown with trade-offs)${evidencePrompt}
+${formatInstruction}
+${levelInstruction}
+${lengthInstruction}
+${companyInstruction}
+${evidencePrompt}
 
 CRITICAL RULES:
-1. Directly and accurately answer the exact question first. If asked "what is list", explain what a list is (definition, contiguous vs pointer, O(1) random access vs linked list, operations, complexity).
-2. NEVER use a generic boilerplate like "Based on my experience in Core Experience & Portfolio: Core Approach...".
+1. Directly and accurately answer the exact question asked. (e.g. if asked "what is list", explain what a list data structure is immediately with time complexities and implementations).
+2. NEVER use generic boilerplate like "Based on my experience in Core Experience & Portfolio...".
 3. Provide concrete technical terms, Big-O complexities, and practical engineering trade-offs where applicable.
-4. Keep the output clean, readable, and directly applicable.`;
+4. Strictly follow the format, length, and company rules above.`;
+
+  const maxTokens = style === "concise" ? 220 : style === "detailed" ? 480 : 320;
+  const generationConfig = {
+    thinkingConfig: { thinkingBudget: 0 },
+    maxOutputTokens: maxTokens,
+    temperature: 0.2
+  };
 
   const models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"];
   for (const model of models) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 7500);
+      const timeout = setTimeout(() => controller.abort(), 6000);
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig
+        }),
         signal: controller.signal
       });
       clearTimeout(timeout);

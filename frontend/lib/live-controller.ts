@@ -36,6 +36,8 @@ export class LiveController {
   private browserRecognition: unknown = null;
   private browserAnswerTimer: ReturnType<typeof setInterval> | null = null;
   private questionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private currentAnswerText = "";
+  private answeringQuestion = false;
 
   constructor(private notify: (event: LiveMessage | LocalEvent) => void, private onSession: (session: Session) => void) {}
 
@@ -44,6 +46,58 @@ export class LiveController {
     if (!trimmed || this.stopped) return;
     this.notify({ type: "transcript", id: `tr_manual_${Date.now()}`, role: "interviewer", text: trimmed, final: true });
     void this.handleBrowserQuestion(trimmed);
+  }
+
+  /**
+   * Distinguishes between Candidate Speech (answering/narrating) and Interviewer Questions.
+   * If the candidate is speaking their answer, we do NOT trigger a new question generation.
+   */
+  private classifySpeech(text: string): "candidate" | "question" | "filler" {
+    const cleaned = text.trim();
+    if (!cleaned) return "filler";
+    const lower = cleaned.toLowerCase().replace(/[^a-z0-9 ?]/g, " ");
+    const words = lower.split(/\s+/).filter(Boolean);
+
+    const FILLERS = new Set(["okay", "ok", "yeah", "yes", "um", "uh", "so", "right", "sure", "well", "hello", "hi", "testing", "ah"]);
+    if (words.length <= 1 && (words.length === 0 || FILLERS.has(words[0]))) return "filler";
+    if (words.length === 2 && FILLERS.has(words[0]) && FILLERS.has(words[1])) return "filler";
+
+    // First-person narrative markers indicating the candidate is answering
+    const candidateMarkers = /\b(i|i'm|i've|i'd|i'll|my|myself|we|we've|we'd|our|ours)\b/i;
+    const candidateStarters = /^(yes|yeah|sure|so basically|basically|definitely|absolutely|in my experience|what i did|i worked on|i built|i designed|let me explain|as you know|in this case)\b/i;
+
+    // Interviewer question markers directed at candidate
+    const strongQuestionStarters = /^(what|why|how|who|where|when|can you|could you|would you|tell me|explain|describe|walk me through|have you|is there|are there|what's the difference|which)\b/i;
+    const hasQuestionMark = text.includes("?");
+
+    // If an answer is currently active on screen and candidate is answering
+    if (this.currentAnswerText || this.answeringQuestion) {
+      if ((candidateMarkers.test(cleaned) || candidateStarters.test(cleaned)) && !strongQuestionStarters.test(cleaned)) {
+        return "candidate";
+      }
+
+      // Check keyword overlap with current answer (candidate reading or explaining the suggested points)
+      if (this.currentAnswerText) {
+        const answerWords = new Set(this.currentAnswerText.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(w => w.length > 3));
+        let matchCount = 0;
+        for (const w of words) {
+          if (w.length > 3 && answerWords.has(w)) matchCount++;
+        }
+        if (matchCount >= 2 && !strongQuestionStarters.test(cleaned) && !hasQuestionMark) {
+          return "candidate";
+        }
+      }
+    }
+
+    if (strongQuestionStarters.test(cleaned) || hasQuestionMark || /\b(can you explain|could you tell|tell me about|how would you)\b/i.test(cleaned)) {
+      return "question";
+    }
+
+    if (candidateMarkers.test(cleaned) && !strongQuestionStarters.test(cleaned)) {
+      return "candidate";
+    }
+
+    return words.length >= 3 ? "question" : "filler";
   }
 
   /** Hold display updates only. Capture, speaker events, lifecycle, and backend generation continue. */
@@ -294,6 +348,8 @@ export class LiveController {
       clearTimeout(this.questionDebounceTimer);
       this.questionDebounceTimer = null;
     }
+    this.currentAnswerText = "";
+    this.answeringQuestion = false;
     const capture = this.capture; this.capture = null;
     try { capture?.stop(); }
     catch { this.notify({ type: "local", error: "Audio capture cleanup reported an error. Check the browser’s microphone sharing indicator." }); }
@@ -327,25 +383,46 @@ export class LiveController {
       if (Speech) {
         const isMobile = typeof navigator !== "undefined" && (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (typeof window !== "undefined" && window.innerWidth < 768));
         const recognition = new Speech();
-        // On mobile, continuous: true causes speech engines to terminate prematurely or freeze.
-        // continuous: false with clean auto-restart on onend is the battle-tested mobile pattern.
         recognition.continuous = !isMobile;
         recognition.interimResults = true;
         recognition.lang = "en-US";
 
-        const FILLERS = new Set(["okay", "ok", "yeah", "yes", "um", "uh", "so", "right", "sure", "well", "hello", "hi", "testing", "ah"]);
-        const dispatchFinalQuestion = (transcriptText: string) => {
+        const dispatchProcessedSpeech = (transcriptText: string) => {
           const cleaned = transcriptText.trim();
           if (!cleaned || this.stopped) return;
-          const words = cleaned.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).filter(Boolean);
-          if (words.length <= 1 && (words.length === 0 || FILLERS.has(words[0]))) return;
-          if (words.length === 2 && FILLERS.has(words[0]) && FILLERS.has(words[1])) return;
 
+          const classification = this.classifySpeech(cleaned);
+          if (classification === "filler") return;
+
+          if (classification === "candidate") {
+            // Candidate is narrating/speaking their answer!
+            // Attribute to candidate ('You: ...') and DO NOT trigger answer generation
+            this.notify({
+              type: "transcript",
+              id: `tr_user_${Date.now()}`,
+              role: "user",
+              text: cleaned,
+              final: true
+            });
+            return;
+          }
+
+          // It's an Interviewer Question!
           let cleanQuestion = cleaned;
+          const words = cleaned.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).filter(Boolean);
+          const FILLERS = new Set(["okay", "ok", "yeah", "yes", "um", "uh", "so", "right", "sure", "well", "hello", "hi", "testing", "ah"]);
           if (words.length >= 2 && FILLERS.has(words[0])) {
             const firstSpace = cleaned.indexOf(" ");
             if (firstSpace !== -1) cleanQuestion = cleaned.slice(firstSpace + 1).trim();
           }
+
+          this.notify({
+            type: "transcript",
+            id: `tr_interviewer_${Date.now()}`,
+            role: "interviewer",
+            text: cleaned,
+            final: true
+          });
           void this.handleBrowserQuestion(cleanQuestion);
         };
 
@@ -358,15 +435,21 @@ export class LiveController {
             else interim += transcript;
           }
           if (interim.trim() && !this.stopped) {
-            this.notify({ type: "transcript", id: `tr_interim_${Date.now()}`, role: "interviewer", text: interim.trim(), final: false });
+            const isCandidate = /^(i|i'm|i've|we|yes|yeah|sure|in my)\b/i.test(interim.trim());
+            this.notify({
+              type: "transcript",
+              id: `tr_interim_${Date.now()}`,
+              role: isCandidate ? "user" : "interviewer",
+              text: interim.trim(),
+              final: false
+            });
           }
           if (final.trim() && !this.stopped) {
             const finalText = final.trim();
-            this.notify({ type: "transcript", id: `tr_final_${Date.now()}`, role: "interviewer", text: finalText, final: true });
             if (this.questionDebounceTimer) clearTimeout(this.questionDebounceTimer);
             this.questionDebounceTimer = setTimeout(() => {
-              dispatchFinalQuestion(finalText);
-            }, 550);
+              dispatchProcessedSpeech(finalText);
+            }, 450);
           }
         };
 
@@ -412,6 +495,7 @@ export class LiveController {
     const genId = `gen_${Date.now()}`;
     const words = questionText.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).filter(w => w.length > 2);
     this.notify({ type: "question", generation_id: genId, question: questionText, keywords: words.slice(0, 5) });
+    this.answeringQuestion = true;
 
     let evidence: Evidence[] = [];
     try {
@@ -423,75 +507,61 @@ export class LiveController {
       user = getStoredUser();
     } catch { /* ignore */ }
 
-    let answerText = "";
-    let answerEvidence = evidence;
-    let answerKeywords = words.slice(0, 5);
+    // STAGE 1: Instant Local Synthesis (< 25ms!)
+    // The candidate immediately gets structured, high-signal talking points on screen with 0 wait time.
+    const instantLocal = synthesizeLocalAnswer(questionText, user?.preferences, evidence);
+    this.currentAnswerText = instantLocal.answer;
 
-    try {
-      const res = await fetch("/api/live/answer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: questionText, preferences: user?.preferences, evidence })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && typeof data.answer === "string" && data.answer.trim().length > 10) {
-          answerText = data.answer.trim();
-          if (Array.isArray(data.evidence) && data.evidence.length > 0) answerEvidence = data.evidence;
-          if (Array.isArray(data.keywords) && data.keywords.length > 0) answerKeywords = data.keywords;
-        }
-      }
-    } catch {
-      // Offline or network error: will use local synthesizer
-    }
+    this.notify({
+      type: "answer_complete",
+      generation_id: genId,
+      answer: instantLocal.answer,
+      evidence: instantLocal.evidence,
+      keywords: instantLocal.keywords,
+      latency_ms: instantLocal.latency_ms
+    });
 
-    if (!answerText) {
-      const fallback = synthesizeLocalAnswer(questionText, user?.preferences, evidence);
-      answerText = fallback.answer;
-      answerEvidence = fallback.evidence;
-      answerKeywords = fallback.keywords;
-    }
-
-    const chunks = answerText.split(" ");
-    let current = "";
-    let i = 0;
-    if (this.browserAnswerTimer) clearInterval(this.browserAnswerTimer);
-    this.browserAnswerTimer = setInterval(() => {
-      if (this.stopped) {
-        if (this.browserAnswerTimer) clearInterval(this.browserAnswerTimer);
-        this.browserAnswerTimer = null;
-        return;
-      }
-      if (i < chunks.length) {
-        const word = (i === 0 ? "" : " ") + chunks[i];
-        current += word;
-        this.notify({ type: "answer_delta", generation_id: genId, text: word });
-        i++;
-      } else {
-        if (this.browserAnswerTimer) clearInterval(this.browserAnswerTimer);
-        this.browserAnswerTimer = null;
-        this.notify({
-          type: "answer_complete",
-          generation_id: genId,
-          answer: current,
-          evidence: answerEvidence,
-          keywords: answerKeywords,
-          latency_ms: 280
+    if (this.session) {
+      try {
+        addTurnToStoredSession(this.session.id, {
+          id: `turn_${Date.now()}`,
+          role: "interviewer",
+          text: questionText,
+          question: questionText,
+          answer: instantLocal.answer,
+          evidence: instantLocal.evidence,
+          created_at: new Date().toISOString()
         });
-        if (this.session) {
-          try {
-            addTurnToStoredSession(this.session.id, {
-              id: `turn_${Date.now()}`,
-              role: "interviewer",
-              text: questionText,
-              question: questionText,
-              answer: current,
-              evidence: answerEvidence,
-              created_at: new Date().toISOString()
+      } catch { /* ignore */ }
+    }
+
+    // STAGE 2: Parallel Deep AI Stream Enrichment (Gemini 3.8 Flash with thinkingBudget: 0)
+    void (async () => {
+      try {
+        const res = await fetch("/api/live/answer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: questionText, preferences: user?.preferences, evidence })
+        });
+        if (res.ok && !this.stopped) {
+          const data = await res.json();
+          if (data && typeof data.answer === "string" && data.answer.trim().length > 20) {
+            this.currentAnswerText = data.answer.trim();
+            this.notify({
+              type: "answer_complete",
+              generation_id: genId,
+              answer: data.answer.trim(),
+              evidence: data.evidence || instantLocal.evidence,
+              keywords: data.keywords || instantLocal.keywords,
+              latency_ms: data.latency_ms || 250
             });
-          } catch { /* ignore */ }
+          }
         }
+      } catch {
+        // Stage 1 already safely displayed
+      } finally {
+        this.answeringQuestion = false;
       }
-    }, 25);
+    })();
   }
 }
