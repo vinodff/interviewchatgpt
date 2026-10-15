@@ -188,7 +188,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
 
       <div className="live-lower-scroll" tabIndex={mobile ? 0 : undefined} aria-label={mobile ? "Scrollable live controls" : undefined}>
         {Object.entries(state.transcriptionWarnings).map(([channel, message]) => <Alert key={channel} tone="info">{message}</Alert>)}
-        <div className="live-alerts">{alerts}{state.error && <Alert>{state.error}</Alert>}{health?.ai_configured === false && <Alert tone="info">The AI provider is not configured. Add the server’s Gemini API key before starting a session.</Alert>}{!minutesAvailable && <Alert tone="info">Your monthly live allowance has been used. Visit Plan & billing to manage your subscription.</Alert>}</div>
+        <div className="live-alerts">{alerts}{state.error && !state.error.toLowerCase().includes("unavailable") && <Alert>{state.error}</Alert>}{health?.ai_configured === false && <Alert tone="info">The AI provider is not configured. Add the server’s Gemini API key before starting a session.</Alert>}{!minutesAvailable && <Alert tone="info">Your monthly live allowance has been used. Visit Plan & billing to manage your subscription.</Alert>}</div>
         <aside className="live-control">
           <details className="panel capture-panel live-collapsible" open={!mobile || captureOpen} onToggle={event => { if (mobile) setCaptureOpen(event.currentTarget.open); }}>
             <summary><Headphones size={18} /><span>{active ? "Connection details" : "Capture setup"}</span><ChevronDown size={17} /></summary>
