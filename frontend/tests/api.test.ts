@@ -31,7 +31,7 @@ describe("backend-only authenticated API", () => {
   it("reports network failure without leaking raw transport diagnostics or writing local records", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("private transport diagnostics"));
     const failure = await api("/sessions", post({ consent: true })).catch(error => error as unknown);
-    expect(failure).toBeInstanceOf(ApiError); expect(failure).toMatchObject({ status: 0, message: expect.stringContaining("backend") });
+    expect(failure).toBeInstanceOf(ApiError); expect(failure).toMatchObject({ status: 0, message: expect.stringContaining("interview service") });
     expect(String(failure)).not.toContain("private transport diagnostics"); expect(storageAccess).not.toHaveBeenCalled();
   });
 

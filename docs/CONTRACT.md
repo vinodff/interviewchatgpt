@@ -1,4 +1,4 @@
-# InterviewPilot Live — integration contract v1
+# InterviewWin Live — integration contract v1
 
 The application supports authorized live interviews and meetings only. Raw audio is ephemeral and never written to disk. All private data is tenant scoped.
 

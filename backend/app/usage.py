@@ -17,7 +17,12 @@ def month_key() -> str:
 def minute_limit(user: User) -> int | None:
     if settings.testing_user(user.id):
         return None
-    return settings.pro_minutes if user.plan == "pro" else settings.free_minutes
+    return {
+        "free": settings.free_minutes,
+        "starter": settings.starter_minutes,
+        "pro": settings.pro_minutes,
+        "value": settings.value_minutes,
+    }.get(user.plan, settings.free_minutes)
 
 
 async def used_seconds(db: AsyncSession, user_id: str) -> int:
@@ -30,7 +35,7 @@ async def user_dict(db: AsyncSession, user: User) -> dict:
             "github_username": user.github_username, "profile": user.profile, "preferences": user.preferences,
             "github_verified": bool(user.github_verified_id), "github_verified_username": user.github_verified_username,
             "minutes_used": round((await used_seconds(db, user.id)) / 60, 2), "minute_limit": minute_limit(user),
-            "testing_mode": settings.testing_user(user.id)}
+            "testing_mode": settings.testing_user(user.id), "billing_account": bool(user.stripe_customer_id)}
 
 
 async def charge(db: AsyncSession, user_id: str, session_id: str, seconds: int) -> int:

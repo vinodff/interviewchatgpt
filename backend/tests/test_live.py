@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -866,6 +867,15 @@ def test_answer_prompt_rules_forbid_company_employment_claims_and_metadata_dumpi
     assert "NEVER claim past or current employment at the target company" in prompt
     assert "PURE CONCEPTUAL / TECHNICAL QUESTIONS" in prompt
     assert "NEVER quote metadata labels" in prompt
+    assert "include_simple_example=false" in prompt
+    assert "simple, relevant hypothetical example" in prompt
+
+
+def test_example_preference_defaults_on_and_can_be_disabled():
+    from app.schemas import Preferences
+
+    assert Preferences().include_simple_example is True
+    assert Preferences(include_simple_example=False).include_simple_example is False
 
 
 async def test_mixed_overlapping_speech_candidate_interrupted_by_interviewer(store):
@@ -928,7 +938,7 @@ async def test_mixed_overlapping_speech_candidate_interrupted_by_interviewer(sto
         assert interviewer_turn.answer.startswith("Answer")
 
 
-async def test_mixed_overlapping_speech_fallback_heuristics_when_llm_omits_fields(store):
+async def test_mixed_speech_preserves_uncertainty_when_llm_omits_spans(store):
     full_text = (
         "To implement the architecture, I separate the layers cleanly. "
         "Can you explain how database transactions ensure consistency?"
@@ -946,45 +956,61 @@ async def test_mixed_overlapping_speech_fallback_heuristics_when_llm_omits_field
     await live._final_transcript("fallback-turn", 0, full_text)
     await finish_question(live)
 
-    assert len(live.memory) == 2
-    assert live.memory[0]["role"] == "user"
-    assert "To implement the architecture" in live.memory[0]["spoken"]
-    assert live.memory[1]["role"] == "interviewer"
-    assert "Can you explain how database transactions" in live.memory[1]["spoken"]
+    assert len(live.memory) == 1
+    assert live.memory[0]["spoken"] == full_text
+    assert live.memory[0]["role"] != "user"
     assert any(m["type"] == "answer_complete" for m in messages)
 
 
-def test_extract_mixed_speech_heuristics():
-    # Trailing question with punctuation
-    t1 = "I use Docker for containerization and deploy on AWS. What are the advantages of Docker over virtual machines?"
-    cand, interv, first = LiveOrchestrator._extract_mixed_speech(t1, question="What are the advantages of Docker?")
-    assert cand == "I use Docker for containerization and deploy on AWS."
-    assert interv == "What are the advantages of Docker over virtual machines?"
-    assert first is False
 
-    # Leading question with candidate immediate response
-    t2 = "Why do you prefer PostgreSQL? Well PostgreSQL has superior JSON support and robust concurrency."
-    cand, interv, first = LiveOrchestrator._extract_mixed_speech(t2, question="Why do you prefer PostgreSQL?")
-    assert interv == "Why do you prefer PostgreSQL?"
-    assert cand == "Well PostgreSQL has superior JSON support and robust concurrency."
-    assert first is True
+@pytest.mark.parametrize("text", [
+    "What is a REST API? How do you implement one?",
+    "Describe a REST API? How do you implement one?",
+    "Please explain the authentication flow. What are the security tradeoffs?",
+    "What are the tradeoffs between REST and GraphQL APIs? Give one example.",
+    "I use Docker for containerization. What are its advantages?",
+])
+def test_mixed_speech_does_not_invent_speakers_from_punctuation(text):
+    cand, interv, _ = LiveOrchestrator._extract_mixed_speech(text)
+    assert cand == ""
+    assert interv == text
 
-    # Unpunctuated speech with question marker
-    t3 = "Then we separate the services into different microservices so what are the advantages of microservices here"
-    cand, interv, first = LiveOrchestrator._extract_mixed_speech(t3, question="What are the advantages of microservices?")
-    assert cand == "Then we separate the services into different microservices"
-    assert interv == "so what are the advantages of microservices here"
-    assert first is False
 
-    # Glued question word without whitespace (e.g. 'consistingWhat is SQL?')
-    t4 = "The back end service receives the credential and sends the response. It's typically consistingWhat is SQL?"
-    cand, interv, first = LiveOrchestrator._extract_mixed_speech(t4, question="What is SQL?")
-    assert cand.rstrip(".") == "The back end service receives the credential and sends the response. It's typically consisting"
-    assert interv == "What is SQL?"
-    assert first is False
+def test_mixed_speech_rejects_model_spans_that_are_absent_or_overlap():
+    text = "I used Redis. How does caching work?"
+    assert LiveOrchestrator._extract_mixed_speech(text, "I wrote PostgreSQL", "How does caching work?")[0] == ""
+    assert LiveOrchestrator._extract_mixed_speech(text, text, "How does caching work?")[0] == ""
 
-    # Glued question word inside _clean_stutter
-    cleaned = LiveOrchestrator._clean_stutter("It's typically consistingWhat is SQL?")
-    assert cleaned == "It's typically consisting What is SQL?"
+
+@pytest.mark.parametrize("audio_mode", ["tab", "microphone"])
+async def test_multipart_interviewer_question_never_invents_candidate_speech(store, audio_mode):
+    text = "What is a REST API? How do you implement one?"
+    live, _, _ = await make_orchestrator(store, AIStub([decision(text, interviewer_speech=text)]))
+    live.audio_mode = audio_mode
+    await live._final_transcript("multipart", 0, text)
+    await finish_question(live)
+    assert len(live.memory) == 1
+    assert live.memory[0]["spoken"] == text
+    assert live.memory[0]["role"] != "user"
+
+
+async def test_known_interviewer_channel_is_preserved_for_nonrequest_speech(store):
+    live, _, _ = await make_orchestrator(store, AIStub([decision("", requests_answer=False, speaker_role="user", utterance_kind="answer")]))
+    live.audio_mode = "tab"
+    await live._final_transcript("clarification", 0, "Yes, the service handles about ten requests per second.")
+    await finish_question(live)
+    assert live.memory[0]["role"] == "interviewer"
+
+
+async def test_retained_turn_timestamps_increase_even_when_clock_repeats(store, monkeypatch):
+    live, _, _ = await make_orchestrator(store)
+    frozen = datetime(2026, 10, 15, tzinfo=UTC)
+    monkeypatch.setattr("app.services.live.utcnow", lambda: frozen)
+    for index in range(3):
+        await live._persist_turn({"id": f"frozen-{index}", "role": "unknown", "spoken": str(index)})
+    async with store() as db:
+        turns = list((await db.scalars(select(Turn).order_by(Turn.created_at))).all())
+        assert [turn.text for turn in turns] == ["0", "1", "2"]
+        assert turns[0].created_at < turns[1].created_at < turns[2].created_at
 
 

@@ -1,5 +1,7 @@
 import { LoaderCircle, X, CircleAlert, ArrowUpRight, FileText } from "lucide-react";
 import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { isBrowserWorkspace } from "@/lib/workspace-mode";
+import { getStoredSourceContent } from "@/lib/browser-storage";
 import type { Evidence } from "@/lib/types";
 
 export function Button({ children, variant = "primary", busy, className = "", ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger"; busy?: boolean }) {
@@ -26,15 +28,17 @@ export function EvidenceList({ evidence }: { evidence: Evidence[] }) {
   const warning = evidence.find(item => item.retrieval_warning)?.retrieval_warning;
 
   const handleOpenSource = (item: Evidence, e: React.MouseEvent) => {
-    if (typeof window !== "undefined") {
-      const stored = window.localStorage.getItem(`interviewpilot_source_content_${item.source_id}`);
+    if (isBrowserWorkspace() && typeof window !== "undefined") {
+      let stored: string | null = null;
+      try { stored = getStoredSourceContent(item.source_id); } catch { /* Excerpt remains available when device storage is blocked. */ }
       const textToOpen = stored || item.text;
       if (textToOpen && textToOpen.length > 20) {
         e.preventDefault();
         const header = `=== ${item.source_name} (${item.locator || "Source Context"}) ===\n\n`;
         const blob = new Blob([header + textToOpen], { type: "text/plain;charset=utf-8" });
         const url = URL.createObjectURL(blob);
-        window.open(url, "_blank");
+        window.open(url, "_blank", "noopener,noreferrer");
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
       }
     }
   };

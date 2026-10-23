@@ -237,6 +237,8 @@ def test_checkout_reuses_unexpired_session_across_idempotency_windows(client, mo
     user = signup(client)
     monkeypatch.setattr(settings, "stripe_secret_key", SecretStr("test-only"))
     monkeypatch.setattr(settings, "stripe_price_id", "price_pro")
+    monkeypatch.setattr(settings, "stripe_webhook_secret", SecretStr("test-only"))
+    monkeypatch.setattr(stripe.Price, "retrieve", lambda *_args, **_kwargs: {"active": True, "type": "recurring", "currency": "inr", "unit_amount": settings.pro_price_minor, "billing_scheme": "per_unit", "recurring": {"interval": "month", "interval_count": 1, "usage_type": "licensed"}})
     async def setup():
         async with SessionLocal() as db:
             item = await db.get(User, user["id"])
@@ -244,7 +246,7 @@ def test_checkout_reuses_unexpired_session_across_idempotency_windows(client, mo
             await db.commit()
     asyncio.run(setup())
     monkeypatch.setattr(stripe.Subscription, "list", lambda **_kwargs: SimpleNamespace(data=[], has_more=False))
-    monkeypatch.setattr(stripe.checkout.Session, "list", lambda **_kwargs: SimpleNamespace(data=[SimpleNamespace(mode="subscription", url="https://checkout.stripe.com/existing")], has_more=False))
+    monkeypatch.setattr(stripe.checkout.Session, "list", lambda **_kwargs: SimpleNamespace(data=[SimpleNamespace(mode="subscription", url="https://checkout.stripe.com/existing", metadata={"plan": "pro", "price_id": "price_pro"})], has_more=False))
     def forbidden_create(**_kwargs):
         raise AssertionError("A second payable checkout must not be created")
     monkeypatch.setattr(stripe.checkout.Session, "create", forbidden_create)

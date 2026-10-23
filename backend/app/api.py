@@ -25,6 +25,7 @@ from app.schemas import (
     ResetConfirm,
     ResetRequest,
     SessionCreate,
+    SupabaseSession,
 )
 from app.security import (
     COOKIE,
@@ -99,6 +100,41 @@ async def login(body: Login, request: Request, response: Response, db: AsyncSess
     return await user_dict(db, user)
 
 
+@router.post("/auth/supabase-session")
+async def supabase_session(body: SupabaseSession, request: Request, response: Response, db: AsyncSession = Depends(database)):
+    await rate_limit("supabase-session:" + (request.client.host if request.client else "unknown"), 30, 60)
+    email = str(body.email).lower().strip()
+    name = (body.name or "").strip() or email.split("@")[0]
+    user = await db.get(User, body.user_id)
+    if not user:
+        user = await db.scalar(select(User).where(User.email == email))
+    if not user:
+        user = User(
+            id=body.user_id,
+            email=email,
+            name=name,
+            password_hash="supabase_oauth",
+        )
+        db.add(user)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            user = await db.scalar(select(User).where(User.email == email))
+            if not user:
+                raise HTTPException(500, "Unable to establish user profile")
+    else:
+        if not user.name and name:
+            user.name = name
+            await db.commit()
+
+    old = request.cookies.get(COOKIE)
+    if old:
+        await db.execute(delete(AuthSession).where(AuthSession.token_hash == token_hash(old)))
+    await issue_cookie(user.id, db, response)
+    return await user_dict(db, user)
+
+
 @router.post("/auth/logout")
 async def logout(request: Request, response: Response, db: AsyncSession = Depends(database)):
     await db.execute(delete(AuthSession).where(AuthSession.token_hash == token_hash(request.cookies.get(COOKIE, ""))))
@@ -129,7 +165,7 @@ async def profile(body: ProfileUpdate, user: User = Depends(current_user), db: A
 
 def send_reset(email: str, token: str):
     message = EmailMessage()
-    message["Subject"] = "Reset your InterviewPilot Live password"
+    message["Subject"] = "Reset your InterviewWin Live password"
     message["From"] = settings.smtp_from
     message["To"] = email
     message.set_content("Reset your password within 30 minutes: " + settings.public_url + "/?reset=" + token)
@@ -199,7 +235,7 @@ async def delete_account(response: Response, user: User = Depends(current_user),
                     raise HTTPException(409, "Billing history requires operator review before account deletion")
             except stripe.StripeError:
                 raise HTTPException(503, "Billing verification failed; your account has been kept") from None
-        elif user.plan == "pro":
+        elif user.plan in {"starter", "pro"}:
             raise HTTPException(409, "End your subscription before deleting the account")
         files = (await db.scalars(select(Source.storage_path).where(Source.user_id == user.id))).all()
         sessions = (await db.scalars(select(LiveSession.id).where(LiveSession.user_id == user.id))).all()

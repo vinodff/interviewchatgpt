@@ -14,6 +14,7 @@ import uuid
 from array import array
 from collections import deque
 from collections.abc import Awaitable, Callable
+from datetime import UTC, timedelta
 from difflib import SequenceMatcher
 from typing import Literal
 
@@ -23,7 +24,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models import LiveSession, Project, Turn, User
+from app.models import LiveSession, Project, Turn, User, utcnow
 from app.services.ai import GeminiService, ProviderError, provider_error
 
 
@@ -100,6 +101,7 @@ class LiveOrchestrator:
         self._transcript_lock = asyncio.Lock()
         self._generation_lock = asyncio.Lock()
         self._state_lock = asyncio.Lock()
+        self._persist_lock = asyncio.Lock()
         self._revision = 0
         self._classification_revision = 0
         self._user_revision = 0
@@ -188,14 +190,21 @@ class LiveOrchestrator:
     async def _persist_turn(self, entry: dict):
         if not self.retention or self._stopping:
             return
-        async with self.db() as db:
+        async with self._persist_lock, self.db() as db:
             # Recheck ownership and retention for every write, including after account deletion.
             session = await db.scalar(select(LiveSession).where(
                 LiveSession.id == self.session_id, LiveSession.user_id == self.user_id,
             ))
             if session is None or not session.retention or self._stopping:
                 return
-            db.add(Turn(id=entry["id"], session_id=self.session_id, role=entry["role"], text=entry["spoken"]))
+            latest = await db.scalar(select(Turn.created_at).where(Turn.session_id == self.session_id)
+                                     .order_by(Turn.created_at.desc()).limit(1))
+            created_at = utcnow()
+            # Some clocks repeat timestamps across consecutive writes. Keep persisted
+            # turn order stable for history and reconnect without relying on UUID order.
+            if latest is not None and latest.replace(tzinfo=UTC) >= created_at:
+                created_at = latest.replace(tzinfo=UTC) + timedelta(microseconds=1)
+            db.add(Turn(id=entry["id"], session_id=self.session_id, role=entry["role"], text=entry["spoken"], created_at=created_at))
             await db.commit()
 
     async def _update_turn(self, turn_id: str, revision: int, **values):
@@ -660,6 +669,9 @@ class LiveOrchestrator:
             "false starts, repeated clauses, or transcription repetitions into the question. Strip conversational "
             "preambles ('can you please explain to me', 'tell me about', 'could you explain', 'okay so'). "
             "Return 2-5 meaningful technical topic keywords in 'keywords'; NEVER include generic filler words like 'okay', 'what', or 'can'.\n"
+            "An isolated technical topic is a request for its definition, including 'database means', "
+            "'SQL means', 'Python means', or the topic name alone. Answer it even after an unrelated code "
+            "task; a keyword inside a full candidate explanation or reported past question is not a new request.\n"
             "SPEAKER & TURN ATTRIBUTION & OVERLAPPING SPEECH:\n"
             "Set utterance_kind to request, answer, candidate_question, acknowledgment, chitchat, incomplete, "
             "self_reading, or unknown.\n"
@@ -749,77 +761,20 @@ class LiveOrchestrator:
     def _extract_mixed_speech(
         text: str, candidate_speech: str = "", interviewer_speech: str = "", question: str = ""
     ) -> tuple[str, str, bool]:
-        # Pre-pass: separate glued question words caused by simultaneous speech/interruption
-        text_clean = re.sub(
-            r"([a-z0-9,;.])(What|Why|How|Can|Could|Would|Is|Are|Do|Does|Which|Where|Who|Tell|Explain|So)\b",
-            r"\1 \2",
-            text.strip(),
-        )
-        # Ensure sentence boundary before question starter if interrupted without punctuation
-        text_clean = re.sub(
-            r"([a-z0-9])\s+(What\s+is|What\s+are|What\s+does|What\s+do|Why\s+is|Why\s+do|How\s+is|How\s+do|How\s+does|Can\s+you|Could\s+you|So\s+what\s+is)\b",
-            r"\1. \2",
-            text_clean,
-        )
-        cand = (candidate_speech or "").strip()
-        interv = (interviewer_speech or "").strip()
-
-        # If LLM provided both parts, verify and determine order
+        # Punctuation and question words cannot establish speaker identity.
+        # Split only complete, disjoint model spans that occur in the source.
+        source = " ".join(text.split())
+        cand = " ".join((candidate_speech or "").split())
+        interv = " ".join((interviewer_speech or "").split())
         if cand and interv:
-            cand_pos = text_clean.casefold().find(cand[:min(25, len(cand))].casefold())
-            interv_pos = text_clean.casefold().find(interv[:min(25, len(interv))].casefold())
-            interviewer_first = interv_pos != -1 and (cand_pos == -1 or interv_pos < cand_pos)
-            return cand, interv, interviewer_first
-
-        # Fallback heuristic: check if utterance has an embedded question at the end or beginning
-        parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text_clean) if p.strip()]
-        question_words = ("what", "why", "how", "can", "could", "would", "is", "are", "do", "does", "explain", "walk", "tell", "so what", "which", "where", "who")
-        if len(parts) >= 2:
-            last_part = parts[-1]
-            first_part = parts[0]
-
-            # Trailing question (candidate explanation ending with interviewer question/interruption)
-            last_clean = last_part.rstrip(".!?").casefold()
-            is_trailing_question = (
-                last_part.endswith("?")
-                or any(last_clean.startswith(qw + " ") or last_clean == qw for qw in question_words)
-                or (question and SequenceMatcher(None, question.casefold(), last_clean).ratio() > 0.55)
-            )
-            if is_trailing_question:
-                cand_candidate = " ".join(parts[:-1]).strip()
-                interv_candidate = last_part
-                if len(cand_candidate.split()) >= 3:
-                    return cand_candidate, interv_candidate, False
-
-            # Leading question (interviewer asked, candidate answered immediately)
-            first_clean = first_part.rstrip(".!?").casefold()
-            is_leading_question = (
-                first_part.endswith("?")
-                or any(first_clean.startswith(qw + " ") for qw in question_words)
-                or (question and SequenceMatcher(None, question.casefold(), first_clean).ratio() > 0.55)
-            )
-            if is_leading_question:
-                interv_candidate = first_part
-                cand_candidate = " ".join(parts[1:]).strip()
-                if len(cand_candidate.split()) >= 3:
-                    return cand_candidate, interv_candidate, True
-
-        # Fallback for unpunctuated text with question markers
-        lower_text = text_clean.casefold()
-        question_markers = (
-            " so what is ", " so what are ", " what is ", " what are ", " what does ", " what do ",
-            " why is ", " why do ", " why does ", " how is ", " how do ", " how does ", " how can ",
-            " can you ", " could you ", " would you ", " explain ", " tell me about ", " tell me "
-        )
-        for marker in question_markers:
-            idx = lower_text.rfind(marker)
-            if idx >= 15 and idx + len(marker) < len(text_clean):
-                cand_candidate = text_clean[:idx].strip()
-                interv_candidate = text_clean[idx:].strip()
-                if cand_candidate and interv_candidate:
-                    return cand_candidate, interv_candidate, False
-
-        return "", text_clean, False
+            normalized = source.casefold()
+            cand_pos = normalized.find(cand.casefold())
+            interv_pos = normalized.find(interv.casefold())
+            if cand_pos >= 0 and interv_pos >= 0 and (
+                cand_pos + len(cand) <= interv_pos or interv_pos + len(interv) <= cand_pos
+            ):
+                return cand, interv, interv_pos < cand_pos
+        return "", source, False
 
     async def _classify(self, entry: dict, classification_revision: int, received_at: float):
         try:
@@ -836,9 +791,11 @@ class LiveOrchestrator:
             channel = entry.get("channel", 0)
 
             if decision.requests_answer:
-                cand_text, interv_text, interviewer_first = self._extract_mixed_speech(
-                    entry["spoken"], decision.candidate_speech, decision.interviewer_speech, decision.question
-                )
+                cand_text, interv_text, interviewer_first = "", entry["spoken"], False
+                if self._channel_role(channel) == "unknown":
+                    cand_text, interv_text, interviewer_first = self._extract_mixed_speech(
+                        entry["spoken"], decision.candidate_speech, decision.interviewer_speech, decision.question
+                    )
                 target_entry = entry
                 if cand_text and interv_text:
                     if not interviewer_first:
@@ -913,7 +870,7 @@ class LiveOrchestrator:
                 return target_entry, decision, received_at
             else:
                 role = entry["role"]
-                if decision.speaker_role == "user" or decision.utterance_kind in {"answer", "candidate_question"}:
+                if role == "unknown" and (decision.speaker_role == "user" or decision.utterance_kind in {"answer", "candidate_question"}):
                     role = "user"
                     self._user_revision += 1
                 elif role == "unknown" and decision.confidence >= 0.85:
@@ -1020,9 +977,13 @@ class LiveOrchestrator:
             "must use supported experience; if none exists, offer a clearly hypothetical approach, never an "
             "invented personal story. If needs_clarification=true, ask one short targeted clarification before "
             "making up task requirements. Follow-ups refer to prior code and discussion where available.\n"
-            "DELIVERY AND PERSONAL VOICE: response_delivery=natural uses short first-person conversational phrasing "
-            "('I use...', 'In my work...') and contractions where appropriate, without filler theatrics, generic polished introductions or a rigid "
-            "memorized speech. STRICTLY FORBIDDEN for natural: bullet pointers (• - *), numbered lists (1. 2.), markdown headers (###), bold markers (**), "
+            "DELIVERY AND PERSONAL VOICE: response_delivery=natural sounds like a candidate explaining the answer in an interview. "
+            "Use short conversational sentences, familiar words and contractions where appropriate. Separate thoughts with commas, "
+            "full stops and occasional short paragraph breaks for natural breathing pauses, rather than one dense paragraph. "
+            "Use a light connector such as 'So' or 'For example' only when it fits; never force fillers like 'um', 'uh' or 'I mean', "
+            "repeated ellipses, or literal pause/stage directions. Use first person only for supported personal claims. "
+            "Avoid generic polished introductions or a rigid memorized speech. STRICTLY FORBIDDEN for natural: "
+            "bullet pointers (• - *), numbered lists (1. 2.), markdown headers (###), bold markers (**), "
             "or rigid section templates like '**Structure**:'. Output flowing spoken sentences only that the candidate can say in their own narration voice. "
             "talking_points uses 3-5 short cue bullets the candidate can express in their own "
             "words. structured gives a complete organized explanation. These choices never override a request "
@@ -1037,8 +998,13 @@ class LiveOrchestrator:
             "Meta values speed and impact; Google values DSA depth with complexity analysis; TCS/Wipro/Infosys value fundamentals (OOPs, DBMS), project experience, and clear communication; "
             "Lumen values networking/telecom reliability and practical engineering. Target company and role are strictly context to calibrate technical rigor and domain expectations. "
             "NEVER claim past or current employment at the target company (e.g. NEVER say 'As a Software Engineer at Lumen...'). Never invent employment, offers, or interviews at that company.\n"
-            "ANSWER PREFERENCES: Professional means clear and direct. Friendly means warm, approachable, "
-            "and natural. Casual means relaxed spoken phrasing and contractions, without adding unsupported "
+            "ANSWER PREFERENCES: Unless include_simple_example=false, give the direct answer followed by one short, "
+            "simple, relevant hypothetical example within the selected answer length. For code, a tiny input/output "
+            "demonstration suffices. Do not invent personal experience. Strict grounding permits examples only "
+            "when supported by the evidence. Omit examples for clarification-only or explicitly example-free requests. "
+            "If include_simple_example=false, include an example only when the question explicitly asks for one. "
+            "Professional means clear and direct. Friendly means warm, approachable and natural. "
+            "Casual means relaxed spoken phrasing and contractions, without adding unsupported "
             "experience or slang that changes meaning. If grounding=strict, every substantive factual statement "
             "must be supported by the retrieved source excerpts. Do not supplement them with general knowledge; "
             "say which information is missing instead. Balanced grounding may use accurate general technical "

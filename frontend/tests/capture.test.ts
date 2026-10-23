@@ -55,4 +55,9 @@ describe("capture permissions and disposal", () => {
     media.getDisplayMedia.mockImplementation(() => { throw new Error("Browser rejected activation"); });
     expect(() => new AudioCapture("tab", vi.fn(), vi.fn())).toThrow("activation"); expect(Context.instances[0].close).toHaveBeenCalledOnce();
   });
+  it("keeps soft speech out of aggressive noise suppression in Enhanced mode", async () => {
+    media.getUserMedia.mockResolvedValue(new Stream());
+    const capture = new AudioCapture("microphone", vi.fn(), vi.fn(), { enhanced: true }); await capture.ready;
+    expect(media.getUserMedia).toHaveBeenCalledWith({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true }, video: false }); capture.stop();
+  });
 });

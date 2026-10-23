@@ -5,10 +5,9 @@ import { useOwnedApi } from "@/lib/use-owned-api";
 import { ROLES, searchCompanies } from "@/lib/companies";
 import type { Preferences, User } from "@/lib/types";
 import { Alert, Button } from "./ui";
-import { updateStoredUser } from "@/lib/browser-storage";
 
 export function completePreferences(preferences: Preferences = {}): Preferences {
-  return { role: "", company: "", language: "English", answer_style: "concise", job_description: "", answer_tone: "professional", grounding: "balanced", english_level: "everyday", reading_mode: "auto", reading_wpm: 130, response_delivery: "natural", personalization: "grounded", answer_text_size: 17, answer_font: "system", answer_theme: "default", ...preferences };
+  return { include_simple_example: true, role: "", company: "", language: "English", answer_style: "concise", job_description: "", answer_tone: "professional", grounding: "balanced", english_level: "everyday", reading_mode: "auto", reading_wpm: 130, response_delivery: "natural", personalization: "grounded", answer_text_size: 17, answer_font: "system", answer_theme: "default", ...preferences };
 }
 
 type ComboItem = { key: string; label: string; sub?: string };
@@ -41,7 +40,7 @@ function ComboField({ label, name, value, defaultValue, placeholder, getItems, o
   const listId = `${name}-suggestions`;
   return <div className="combo-field" ref={box}>
     <label>{label}<input
-      name={name} role="combobox" aria-expanded={open} aria-controls={listId} aria-autocomplete="list" autoComplete="off"
+      name={name} role="combobox" aria-expanded={open} aria-controls={open ? listId : undefined} aria-activedescendant={open && items.length ? `${listId}-${Math.min(highlight, items.length - 1)}` : undefined} aria-autocomplete="list" autoComplete="off"
       value={query} placeholder={placeholder} maxLength={80}
       onChange={event => { setQuery(event.target.value); setOpen(true); setHighlight(0); }}
       onFocus={() => setOpen(true)}
@@ -55,9 +54,9 @@ function ComboField({ label, name, value, defaultValue, placeholder, getItems, o
     /></label>
     {open && items.length > 0 && <ul className="combo-list" id={listId} role="listbox" aria-label={`${label} suggestions`}>
       {items.map((item, index) => <li key={item.key}>
-        <button type="button" role="option" aria-selected={index === highlight}
+        <button type="button" id={`${listId}-${index}`} role="option" aria-selected={index === highlight}
           className={`combo-option ${index === highlight ? "highlight" : ""}`}
-          onMouseDown={event => { event.preventDefault(); commit(item.label); }}>
+          onMouseDown={event => event.preventDefault()} onClick={() => commit(item.label)}>
           <span>{item.label}</span>{item.sub && <small>{item.sub}</small>}
         </button>
       </li>)}
@@ -93,29 +92,32 @@ export function AnswerPreferenceFields({ preferences, controlled = false, onChan
   const [draftMode, setDraftMode] = useState(preferences.reading_mode || "auto");
   const mode = controlled ? preferences.reading_mode || "auto" : draftMode;
   const textSize = preferences.answer_text_size ?? 17;
+  const [sizeDraft, setSizeDraft] = useState({ base: textSize, value: textSize });
+  const displayedTextSize = controlled || sizeDraft.base !== textSize ? textSize : sizeDraft.value;
   function value(key: "answer_tone" | "grounding" | "english_level" | "response_delivery" | "personalization" | "answer_style" | "reading_mode" | "answer_font" | "answer_theme", fallback: string) {
     return controlled ? { value: (preferences[key] as string) || fallback } : { defaultValue: (preferences[key] as string) || fallback };
   }
   return <div className="answer-preference-fields">
     <div className="preference-primary">
-      <CompanyField preferences={preferences} controlled={controlled} onChange={onChange} />
-      <RoleField preferences={preferences} controlled={controlled} onChange={onChange} />
+      {!controlled && <><CompanyField preferences={preferences} /><RoleField preferences={preferences} /></>}
       <label>Answer format<select name="response_delivery" {...value("response_delivery", "natural")} onChange={event => onChange?.({ ...preferences, response_delivery: event.target.value as Preferences["response_delivery"] })}><option value="natural">Natural answer</option><option value="talking_points">Talking points</option><option value="structured">Step by step</option></select></label>
-      <label>English level<select name="english_level" {...value("english_level", "everyday")} onChange={event => onChange?.({ ...preferences, english_level: event.target.value as Preferences["english_level"] })}><option value="simple">Simple English</option><option value="everyday">Everyday English</option><option value="advanced">Advanced English</option></select></label>
       <label>Answer length<select name="answer_style" {...value("answer_style", "concise")} onChange={event => onChange?.({ ...preferences, answer_style: event.target.value })}><option value="concise">Short</option><option value="balanced">Balanced</option><option value="detailed">Detailed</option></select></label>
       <label>Hands-free scrolling<select name="reading_mode" {...value("reading_mode", "auto")} onChange={event => { const selected = event.target.value as NonNullable<Preferences["reading_mode"]>; setDraftMode(selected); onChange?.({ ...preferences, reading_mode: selected }); }}><option value="auto">Auto · speech + timed</option><option value="speech">Follow my speech</option><option value="paced">Timed scrolling</option><option value="off">Off</option></select></label>
     </div>
-    <div className="preference-display">
-      <label className="answer-size-control">Answer text size <output>{textSize}px</output><input aria-label="Answer text size" name="answer_text_size" type="range" min={14} max={24} step={1} value={controlled ? textSize : undefined} defaultValue={controlled ? undefined : textSize} onChange={event => onChange?.({ ...preferences, answer_text_size: Number(event.target.value) })} /></label>
+    <details className="preference-display"><summary>Reading options</summary>
+      <label className="answer-size-control">Answer text size <output>{displayedTextSize}px</output><input aria-label="Answer text size" name="answer_text_size" type="range" min={14} max={24} step={1} value={controlled ? textSize : undefined} defaultValue={controlled ? undefined : textSize} onChange={event => { const next = Number(event.target.value); setSizeDraft({ base: textSize, value: next }); onChange?.({ ...preferences, answer_text_size: next }); }} /></label>
       <div className="preference-display-row">
         <label>Reading font<select name="answer_font" {...value("answer_font", "system")} onChange={event => onChange?.({ ...preferences, answer_font: event.target.value as Preferences["answer_font"] })}><option value="system">System · easy to read</option><option value="serif">Serif · calm</option><option value="readable">Readable · wide spacing</option></select></label>
         <label>Answer theme<select name="answer_theme" {...value("answer_theme", "default")} onChange={event => onChange?.({ ...preferences, answer_theme: event.target.value as Preferences["answer_theme"] })}><option value="default">Default</option><option value="easy">Easy-read · highlighted</option><option value="contrast">High contrast</option></select></label>
       </div>
-      <p className="preference-help">Text size, font and theme apply instantly on this device, including on mobile. Answer format applies to the next question.</p>
-    </div>
+      <p className="preference-help">{controlled ? "Changes save automatically." : "Save profile to apply changes."} Saved text size, font and theme apply on this device, including on mobile. Answer format and examples apply to the next question.</p>
+    </details>
     <details className="preference-advanced">
       <summary><SlidersHorizontal size={16} aria-hidden="true" /><span>More options<small>Tone, sources &amp; reading speed</small></span><ChevronDown size={16} aria-hidden="true" /></summary>
       <div className="preference-advanced-fields">
+        {controlled && <><CompanyField preferences={preferences} controlled onChange={onChange} /><RoleField preferences={preferences} controlled onChange={onChange} /></>}
+        <label>English level<select name="english_level" {...value("english_level", "everyday")} onChange={event => onChange?.({ ...preferences, english_level: event.target.value as Preferences["english_level"] })}><option value="simple">Simple English</option><option value="everyday">Everyday English</option><option value="advanced">Advanced English</option></select></label>
+        <label>Simple example<select name="include_simple_example" {...(controlled ? { value: String(preferences.include_simple_example !== false) } : { defaultValue: String(preferences.include_simple_example !== false) })} onChange={event => onChange?.({ ...preferences, include_simple_example: event.target.value === "true" })}><option value="true">Include one relevant example</option><option value="false">Only when I ask</option></select></label>
         <label>Answer tone<select name="answer_tone" {...value("answer_tone", "professional")} onChange={event => onChange?.({ ...preferences, answer_tone: event.target.value as Preferences["answer_tone"] })}><option value="professional">Professional</option><option value="friendly">Friendly</option><option value="casual">Casual</option></select></label>
         <label>Personalization<select name="personalization" {...value("personalization", "grounded")} onChange={event => onChange?.({ ...preferences, personalization: event.target.value as Preferences["personalization"] })}><option value="grounded">Use my experience</option><option value="technical">Focus on the technical topic</option></select></label>
         <label>Answer sources<select name="grounding" {...value("grounding", "balanced")} onChange={event => { const selected = event.target.value as NonNullable<Preferences["grounding"]>; setDraftGrounding(selected); onChange?.({ ...preferences, grounding: selected }); }}><option value="balanced">My sources + technical knowledge</option><option value="strict">My uploaded sources only</option></select></label>
@@ -132,7 +134,7 @@ function ReadingSpeedField({ preferences, controlled, onChange }: { preferences:
   const [speedDraft, setSpeedDraft] = useState(() => ({ base: wpm, value: String(wpm) }));
   const speed = speedDraft.base === wpm ? speedDraft.value : String(wpm);
   const speedProps = controlled ? { value: speed } : { defaultValue: wpm };
-  return <label>Reading speed<span className="preference-speed"><input name="reading_wpm" aria-label="Reading speed" type="number" min={60} max={240} step={1} required {...speedProps} onInvalid={event => { const details = event.currentTarget.closest("details"); if (details) details.open = true; }} onChange={event => { setSpeedDraft({ base: wpm, value: event.target.value }); if (event.target.value !== "" && Number.isFinite(event.target.valueAsNumber)) onChange?.({ ...preferences, reading_wpm: event.target.valueAsNumber }); }} /><span>words / min</span></span></label>;
+  return <label>Reading speed<span className="preference-speed"><input name="reading_wpm" aria-label="Reading speed" type="number" min={60} max={240} step={1} required {...speedProps} onInvalid={event => { const details = event.currentTarget.closest("details"); if (details) details.open = true; }} onChange={event => { const next = event.target.valueAsNumber; setSpeedDraft({ base: wpm, value: event.target.value }); if (event.target.value !== "" && Number.isInteger(next) && next >= 60 && next <= 240) onChange?.({ ...preferences, reading_wpm: next }); }} /><span>words / min</span></span></label>;
 }
 
 export function LiveAnswerPreferences({ user, onUser }: { user: User; onUser: (user: User) => void }) {
@@ -153,13 +155,10 @@ export function LiveAnswerPreferences({ user, onUser }: { user: User; onUser: (u
   }, [preferences]);
   function setPreferences(value: Preferences) {
     setDraft({ signature, value });
+    setError("");
     setSaved(false);
     setAutoState("saving");
-    // Immediately persist to browser storage and notify parent so LiveController has it with 0ms latency
-    try {
-      const stored = updateStoredUser({ preferences: value });
-      onUser(stored);
-    } catch { /* ignore */ }
+
   }
   // Auto-apply: every dropdown/slider change persists immediately so the next
   // question uses it. No Save click required (fixes "selected parameters not applying").
@@ -169,12 +168,8 @@ export function LiveAnswerPreferences({ user, onUser }: { user: User; onUser: (u
     saveTimer.current = setTimeout(async () => {
       setBusy(true);
       try {
-        const stored = updateStoredUser({ preferences: latest.current });
-        onUser(stored);
-        try {
-          const updated = await api<User>("/profile", { method: "PATCH", body: JSON.stringify({ preferences: latest.current }) });
-          onUser(updated);
-        } catch { /* LocalStorage is primary */ }
+        const updated = await api<User>("/profile", { method: "PATCH", body: JSON.stringify({ preferences: latest.current }) });
+        onUser(updated);
         setSaved(true); setAutoState("applied");
       } catch (error) {
         setError(messageOf(error)); setAutoState("idle");
@@ -193,12 +188,7 @@ export function LiveAnswerPreferences({ user, onUser }: { user: User; onUser: (u
     try {
       const updated = await api<User>("/profile", { method: "PATCH", body: JSON.stringify({ preferences }) });
       onUser(updated); setSaved(true); setAutoState("applied");
-    } catch {
-      try {
-        const updated = updateStoredUser({ preferences });
-        onUser(updated); setSaved(true); setAutoState("applied");
-      } catch (error) { setError(messageOf(error)); }
-    } finally { setBusy(false); }
+    } catch (error) { setError(messageOf(error)); } finally { setBusy(false); }
   }
   const formatLabel = preferences.response_delivery === "natural" ? "Natural answer" : preferences.response_delivery === "talking_points" ? "Talking points" : "Step by step";
   return <form className="form-stack live-preference-form" onSubmit={save}>
@@ -206,7 +196,7 @@ export function LiveAnswerPreferences({ user, onUser }: { user: User; onUser: (u
       <AnswerPreferenceFields preferences={preferences} controlled onChange={value => { setPreferences(value); setSaved(false); }} />
     </fieldset>
     {error && <Alert>{error}</Alert>}
-    <Button type="submit" variant="secondary" busy={busy}>Save answer preferences <Check size={16} /></Button>
-    <p className="preference-help" role="status">{autoState === "saving" ? "Applying… next question will use " + formatLabel + "." : saved || autoState === "applied" ? `Applied ✓ Next question uses ${formatLabel}. Display updates now.` : "Changes apply automatically. Answers update next question. Display updates now."}</p>
+    {error && <Button type="submit" variant="secondary" busy={busy}>Retry saving <Check size={16} /></Button>}
+    <p className="preference-help" role="status">{autoState === "saving" ? "Saving your preferences…" : saved || autoState === "applied" ? `Saved. The next question will use ${formatLabel}.` : "Changes save automatically."}</p>
   </form>;
 }

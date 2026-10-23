@@ -11,28 +11,28 @@ test("spoken implementation request shows Python and a spoken follow-up gets an 
   const headers = { "X-InterviewPilot": "1", Origin: "http://localhost:3001" };
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", { name: "Create account", exact: true }).click();
   await page.getByLabel("Your name").fill("Code Fixture");
   await page.getByLabel("Email address").fill(`browser-code-${Date.now()}@example.com`);
   await page.getByLabel("Password", { exact: true }).fill("Browser-code-fixture-2026!");
-  await page.getByRole("button", { name: "Create my workspace" }).click();
+  await page.getByRole("button", { name: "Create account and continue" }).click();
   await expect(page.getByRole("heading", { name: "Welcome, Code." })).toBeVisible();
   try {
-    await page.getByRole("button", { name: "Live workspace", exact: true }).click();
+    await page.getByRole("button", { name: "Live interview", exact: true }).click();
     const form = page.locator(".live-preference-form");
+    await page.locator(".live-options-panel > summary").click();
     await form.getByLabel("Answer format").selectOption("talking_points");
     await form.locator(".preference-advanced > summary").click();
     await form.getByLabel("Personalization").selectOption("grounded");
     await form.getByLabel("English level").selectOption("simple");
     await form.getByLabel("Hands-free scrolling").selectOption("off");
-    await form.getByRole("button", { name: "Save answer preferences" }).click();
-    await expect(form.getByText("Saved. Answers update", { exact: false })).toBeVisible();
+    await expect(form.getByRole("status")).toContainText("Saved.");
     await page.getByText("Microphone only", { exact: true }).click();
-    await page.getByLabel("Keep session text").uncheck();
-    await page.getByLabel("All participants know about", { exact: false }).check();
+    await page.getByLabel("Save interview text").uncheck();
+    await page.getByLabel("All participants agree to AI assistance", { exact: false }).check();
     // No further clicks are used to request code or request its explanation.
-    await page.getByRole("button", { name: "Start live session" }).click();
+    await page.getByRole("button", { name: "Start live interview" }).click();
     const code = page.locator('.answer-code-block[data-language="python"] > code');
     await expect(code).toContainText("def ", { timeout: 30000 });
     await expect(page.locator(".streaming-label")).toHaveCount(0, { timeout: 15000 });
@@ -46,7 +46,7 @@ test("spoken implementation request shows Python and a spoken follow-up gets an 
     await expect(page.locator(".streaming-label")).toHaveCount(0, { timeout: 10000 });
     await expect(page.locator(".live-metrics")).toContainText("2 questions");
     await page.screenshot({ path: "test-results/live-code-explanation.png", fullPage: true });
-    await page.getByRole("button", { name: "Stop session", exact: true }).click();
+    await page.getByRole("button", { name: "End interview", exact: true }).click();
     await expect(page.getByText("Session stopped", { exact: true })).toBeVisible();
     expect(errors).toEqual([]);
   } finally {

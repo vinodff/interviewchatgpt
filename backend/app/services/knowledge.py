@@ -449,7 +449,9 @@ async def retrieve(user_id: str, query: str, project_id: str | None = None, limi
     query_vector = None
     ai = GeminiService()
     try:
-        query_vector = _validate_vectors(await ai.embed([query], "RETRIEVAL_QUERY"), 1)[0]
+        # Leave time for lexical retrieval inside the live answer's 20 second budget.
+        async with asyncio.timeout(5):
+            query_vector = _validate_vectors(await ai.embed([query], "RETRIEVAL_QUERY"), 1)[0]
     except Exception as error:
         logger.warning(
             "Query embeddings unavailable (%s); using tenant-scoped lexical retrieval.", type(error).__name__

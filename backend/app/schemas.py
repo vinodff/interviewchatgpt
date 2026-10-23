@@ -22,6 +22,7 @@ class Preferences(BaseModel):
     answer_tone: Literal["professional", "friendly", "casual"] = "professional"
     english_level: Literal["simple", "everyday", "advanced"] = "everyday"
     response_delivery: Literal["natural", "talking_points", "structured"] = "natural"
+    include_simple_example: bool = True
     personalization: Literal["grounded", "technical"] = "grounded"
     grounding: Literal["balanced", "strict"] = "balanced"
     reading_mode: Literal["auto", "speech", "paced", "off"] = "auto"
@@ -61,3 +62,10 @@ class ResetRequest(BaseModel):
 class ResetConfirm(BaseModel):
     token: str = Field(min_length=32, max_length=100)
     password: str = Field(min_length=12, max_length=128)
+
+
+class SupabaseSession(BaseModel):
+    user_id: str = Field(min_length=1, max_length=64)
+    email: EmailStr
+    name: str = Field(default="", max_length=120)
+    access_token: str = Field(default="", max_length=4096)

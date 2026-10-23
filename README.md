@@ -1,6 +1,24 @@
-# InterviewPilot Live
+# InterviewWin Live
 
-A working consent-based live assistant with a Next.js interface, FastAPI/WebSocket backend, Gemini transcription and streamed answers, and a private PostgreSQL/pgvector knowledge base. Speech drives the live workflow; there is no manual question submission, practice, quiz, or hidden recording mode.
+A working consent-based live assistant with a Next.js interface, FastAPI/WebSocket backend, Gemini transcription and streamed answers, and a private PostgreSQL/pgvector knowledge base. Speech drives the live workflow; there is no practice, quiz, or hidden recording mode.
+
+## Deployment modes
+
+The existing Vercel site runs a **browser workspace** (`NEXT_PUBLIC_WORKSPACE_MODE=browser`). Projects, readable source files, profile preferences and opted-in session text persist on that device through reloads. Speech recognition uses the microphone; structured Gemini decisions distinguish requests from narration and stream answers with bounded session memory, earlier code, task constraints, job context and retrieved evidence. Clear questions use shorter speech stabilization delays; incomplete prefixes wait for their ending. `GEMINI_API_KEY` stays on the server. `GEMINI_FAST_MODEL` and `GEMINI_ANSWER_MODEL` can override model selection.
+
+The **backend workspace** (`NEXT_PUBLIC_WORKSPACE_MODE=backend`) uses FastAPI authentication, persistent storage, ingestion workers and WebSockets. Configure `BACKEND_INTERNAL_URL` and a public `NEXT_PUBLIC_WS_URL` when hosting its frontend separately. Backend errors are surfaced; the app never silently changes storage or authentication modes.
+
+Vercel's browser workspace supports text PDFs, TXT, Markdown and source files. DOCX, scanned images/OCR, actual repository import, GitHub verification, subscriptions and separate meeting-tab audio require the full backend. Unsupported operations show an explicit error. Browser data does not sync between devices and is not a server backup. Use the full backend for an account-based multiuser service.
+
+See the [October 15 bug audit and verification](docs/AUDIT-2026-10-15.md). The opening architecture description and the sections below primarily describe the full backend installation.
+
+The [structured memory and conversation benchmark notes](docs/SMARTER-INTERVIEW-2026-10-15.md) cover short follow-ups, constraint changes, timing and how to measure actual model behavior. Session memory is cleared on Stop and does not promote generated suggestions into personal experience.
+
+The browser workspace now defaults to **Streaming microphone · fast + quiet voices**. It sends continuous amplified PCM to Gemini's dedicated streaming transcription model using a restricted temporary credential. Interim speech reaches the existing contextual answer pipeline without waiting for a complete recording. **Enhanced microphone · short recordings** and **Standard microphone · browser recognition** remain selectable alternatives. See [streaming research, validation and connection limits](docs/STREAMING-SPEECH-2026-10-16.md), [Enhanced microphone notes](docs/ENHANCED-MICROPHONE-2026-10-16.md) and [earlier latency validation](docs/LATENCY-2026-10-16.md).
+
+The browser live view also shows recent questions and short technical topics as selectable buttons. Bare prompts such as “abstract” or “DBMS” can stabilize before a mobile recognizer finalizes a long transcript. Original speech remains available for intent checking, and only model-selected supporting excerpts are attached to answers. See [recent-question and reference validation](docs/RECENT-QUESTIONS-2026-10-16.md).
+
+Short prompts such as “database means”, “SQL means” and “Python means” are definition requests. Explanations include one simple relevant example by default. The **Simple example** preference can be changed to **Only when I ask**; examples follow the selected answer length and grounding rules.
 
 ## Run locally
 

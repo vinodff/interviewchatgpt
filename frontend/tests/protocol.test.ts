@@ -2,6 +2,28 @@ import { describe, expect, it } from "vitest";
 import { initialLiveState, parseLiveMessage, reduceLiveMessage, websocketUrl } from "../lib/protocol";
 
 describe("live answer generations", () => {
+  it("shows recent questions before an answer arrives, retains prior choices, and corrects provisional speech", () => {
+    let state = reduceLiveMessage(initialLiveState, { type: "transcript", id: "speech", role: "unknown", text: "What is dad structure", final: false });
+    const originalId = state.recentQuestions[0].id;
+    state = reduceLiveMessage(state, { type: "transcript", id: "speech", role: "unknown", text: "What is data structure", final: false });
+    expect(state.recentQuestions[0].id).toBe(originalId);
+    expect(state.recentQuestions.map(item => item.question)).toEqual(["What is data structure"]);
+    state = reduceLiveMessage(state, { type: "question", generation_id: "q", question: "What is a data structure?", keywords: [] });
+    state = reduceLiveMessage(state, { type: "transcript", id: "second", role: "unknown", text: "What is DBMS? Abstract class", final: false });
+    expect(state.recentQuestions.map(item => item.question)).toEqual(["What is a data structure?", "What is DBMS", "Explain abstract classes."]);
+    expect(state.question).toBe("What is a data structure?");
+    for (let i = 0; i < 12; i++) state = reduceLiveMessage(state, { type: "question", generation_id: `q${i}`, question: `Explain topic number ${i}`, keywords: [] });
+    expect(state.recentQuestions).toHaveLength(8);
+  });
+  it("gives a corrected topic a distinct stable id after an earlier topic was confirmed", () => {
+    let state = reduceLiveMessage(initialLiveState, { type: "transcript", id: "speech", role: "unknown", text: "What is DBMS?", final: false });
+    state = reduceLiveMessage(state, { type: "question", generation_id: "q", question: "What is DBMS?", keywords: [] });
+    state = reduceLiveMessage(state, { type: "transcript", id: "speech", role: "unknown", text: "What is an abstract class?", final: false });
+    expect(state.recentQuestions).toHaveLength(2); expect(new Set(state.recentQuestions.map(item => item.id)).size).toBe(2);
+    const correctedId = state.recentQuestions[1].id;
+    state = reduceLiveMessage(state, { type: "transcript", id: "speech", role: "unknown", text: "What is an abstract class in Python?", final: false });
+    expect(state.recentQuestions[1].id).toBe(correctedId);
+  });
   it("never replaces an authoritative final transcript with a delayed interim", () => {
     const state = reduceLiveMessage(initialLiveState, { type: "transcript", id: "turn", role: "user", text: "I chose PostgreSQL for transactions.", final: true });
     expect(reduceLiveMessage(state, { type: "transcript", id: "turn", role: "unknown", text: "I chose", final: false })).toBe(state);

@@ -18,7 +18,7 @@ interface StoredChunk {
 }
 
 function getItem<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined" || !window.localStorage) return fallback;
+  if (typeof window === "undefined") return fallback;
   try {
     const raw = window.localStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T) : fallback;
@@ -28,11 +28,24 @@ function getItem<T>(key: string, fallback: T): T {
 }
 
 function setItem<T>(key: string, value: T): void {
-  if (typeof window === "undefined" || !window.localStorage) return;
+  if (typeof window === "undefined") throw new Error("Browser storage is unavailable. Open the workspace in a browser.");
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    /* Safe fallback if localStorage quota exceeded */
+    throw new Error("Could not save to browser storage. Free device space or enable site storage, then try again.");
+  }
+}
+
+/** Roll back a multi-key document save if the browser runs out of space. */
+function commitItems(entries: Array<[string, unknown]>): void {
+  const storage = window.localStorage;
+  const previous = entries.map(([key]) => [key, storage.getItem(key)] as const);
+  try { for (const [key, value] of entries) setItem(key, value); }
+  catch (error) {
+    for (const [key, value] of previous) {
+      try { if (value === null) storage.removeItem(key); else storage.setItem(key, value); } catch { /* Preserve the original storage error. */ }
+    }
+    throw error;
   }
 }
 
@@ -46,8 +59,8 @@ function defaultUser(): User {
     github_verified: false,
     profile: {
       "Target Focus": "Software Engineering & Technical Leadership",
-      "Storage Mode": "Local Browser Storage (Private & Offline-ready)",
-      "Notice": "All your documents, preferences, and session transcripts are stored securely in your browser."
+      "Storage Mode": "This browser only",
+      "Notice": "Documents and retained sessions are saved on this device. Relevant excerpts are sent to the AI provider for answers."
     },
     preferences: {
       role: "Senior Software Engineer",
@@ -61,6 +74,7 @@ function defaultUser(): User {
       reading_wpm: 155,
       response_delivery: "natural",
       personalization: "grounded",
+      include_simple_example: true,
       answer_text_size: 17,
       answer_font: "system",
       answer_theme: "default"
@@ -108,6 +122,7 @@ export function sanitizePreferences(preferences: Preferences = {}): Preferences 
     answer_style: validLength,
     english_level: validLevel as Preferences["english_level"],
     answer_tone: validTone as Preferences["answer_tone"],
+    include_simple_example: preferences.include_simple_example !== false,
     answer_text_size: Number.isFinite(size) ? Math.min(24, Math.max(14, Math.round(size))) : 17,
     answer_font: ["system", "serif", "readable"].includes(preferences.answer_font || "") ? preferences.answer_font : "system",
     answer_theme: ["default", "easy", "contrast"].includes(preferences.answer_theme || "") ? preferences.answer_theme : "default",
@@ -166,7 +181,9 @@ export function createStoredProject(data: { name: string; description?: string }
 export function deleteStoredProject(id: string): void {
   const projects = getStoredProjects().filter(p => p.id !== id);
   setItem(KEY_PROJECTS, projects);
-  const sources = getStoredSources().filter(s => s.project_id !== id);
+  const allSources = getStoredSources();
+  for (const source of allSources.filter(s => s.project_id === id)) window.localStorage.removeItem(`interviewpilot_source_content_${source.id}`);
+  const sources = allSources.filter(s => s.project_id !== id);
   setItem(KEY_SOURCES, sources);
   const chunks = getItem<StoredChunk[]>(KEY_CHUNKS, []).filter(c => c.project_id !== id);
   setItem(KEY_CHUNKS, chunks);
@@ -192,7 +209,7 @@ export async function uploadStoredSource(file: File, projectId: string | null): 
     }
   }
 
-  if (!fileText) {
+  if (!fileText && !isPdf) {
     try {
       fileText = await file.text();
     } catch {
@@ -209,17 +226,18 @@ export async function uploadStoredSource(file: File, projectId: string | null): 
   const cleaned = fileText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFFFD]/g, " ").replace(/[ \t]+/g, " ").trim();
 
   // Split into paragraphs / sections
+  if (!["pdf", "txt", "md", "csv", "json", "py", "js", "ts", "tsx", "jsx", "java", "go", "rs", "cpp", "c", "html", "css"].includes(ext) || !cleaned || isBinaryGarbage) {
+    throw new Error("No readable text was extracted. In this browser workspace, upload a text PDF, TXT, Markdown, or source file. Scanned images and DOCX need the full backend.");
+  }
   const paragraphs = cleaned
     .split(/(?:\r?\n){2,}|(?=\n\s*[•\-\*\d+\.]\s+)/)
     .map(p => p.trim())
-    .filter(p => p.length > 25 && /[a-zA-Z]{3,}/.test(p));
+    .filter(p => p.length > 0)
+    .flatMap(p => p.match(/[\s\S]{1,1800}/g) || []);
 
   const chunksToStore: string[] = paragraphs.length > 0
     ? paragraphs.slice(0, 40)
-    : [
-        `Candidate Background & Experience (${file.name}): Professional track record in software engineering, project delivery, and systems architecture.`,
-        `Technical projects, key achievements, and domain expertise documented in ${file.name}.`
-      ];
+    : [cleaned];
 
   const sourceId = `src_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const kind = isPdf ? "pdf" : ext === "docx" ? "docx" : ext === "md" || ext === "txt" ? "document" : "upload";
@@ -235,43 +253,28 @@ export async function uploadStoredSource(file: File, projectId: string | null): 
     created_at: new Date().toISOString()
   };
 
-  const sources = getStoredSources();
-  setItem(KEY_SOURCES, [source, ...sources]);
-
-  // Save full source content for viewing / downloading without 404
-  setItem(`interviewpilot_source_content_${sourceId}`, cleaned || chunksToStore.join("\n\n"));
-
   // Save extracted chunks
   const existingChunks = getItem<StoredChunk[]>(KEY_CHUNKS, []);
   const newChunks: StoredChunk[] = chunksToStore.map((text, i) => ({
-    id: `chk_${Date.now()}_${i}`,
+    id: `chk_${sourceId}_${i}`,
     source_id: sourceId,
     project_id: projectId,
     source_name: file.name,
     text,
     locator: `Section ${i + 1}`,
     score: 0.95,
-    verified_contribution: true
+    verified_contribution: false
   }));
-  setItem(KEY_CHUNKS, [...newChunks, ...existingChunks]);
-
-  // Increment project source count
-  if (projectId) {
-    const projects = getStoredProjects().map(p => p.id === projectId ? { ...p, source_count: p.source_count + 1 } : p);
-    setItem(KEY_PROJECTS, projects);
-  }
-
-  // Update user profile summary with uploaded documents
   const user = getStoredUser();
-  const currentUploads = (user.profile["Uploaded Sources"] as string[] | undefined) || [];
-  if (!currentUploads.includes(file.name)) {
-    updateStoredUser({
-      profile: {
-        ...user.profile,
-        "Uploaded Sources": [...currentUploads, file.name]
-      }
-    });
-  }
+  const currentUploads = Array.isArray(user.profile["Uploaded Sources"]) ? user.profile["Uploaded Sources"] as string[] : [];
+  const entries: Array<[string, unknown]> = [
+    [KEY_SOURCES, [source, ...getStoredSources()]],
+    [`interviewpilot_source_content_${sourceId}`, cleaned],
+    [KEY_CHUNKS, [...newChunks, ...existingChunks]],
+    [KEY_USER, { ...user, profile: { ...user.profile, "Uploaded Sources": [...new Set([...currentUploads, file.name])] } }],
+  ];
+  if (projectId) entries.push([KEY_PROJECTS, getStoredProjects().map(p => p.id === projectId ? { ...p, source_count: p.source_count + 1 } : p)]);
+  commitItems(entries);
 
   return source;
 }
@@ -285,53 +288,8 @@ export function getStoredSourceContent(sourceId: string): string | null {
 }
 
 export function addStoredGithubSource(projectId: string, url: string): Source {
-  const parts = url.replace(/\/$/, "").split("/");
-  const repoName = parts.slice(-2).join("/");
-  const sourceId = `src_gh_${Date.now()}`;
-  const source: Source = {
-    id: sourceId,
-    project_id: projectId,
-    name: repoName || url,
-    kind: "github",
-    status: "ready",
-    error: null,
-    chunk_count: 2,
-    created_at: new Date().toISOString()
-  };
-  const sources = getStoredSources();
-  setItem(KEY_SOURCES, [source, ...sources]);
-
-  const existingChunks = getItem<StoredChunk[]>(KEY_CHUNKS, []);
-  const newChunks: StoredChunk[] = [
-    {
-      id: `chk_gh_${Date.now()}_1`,
-      source_id: sourceId,
-      project_id: projectId,
-      source_name: repoName,
-      text: `Repository ${repoName}: Core architecture, automated CI/CD workflows, and production features.`,
-      locator: "README.md",
-      score: 0.92,
-      verified_contribution: true
-    },
-    {
-      id: `chk_gh_${Date.now()}_2`,
-      source_id: sourceId,
-      project_id: projectId,
-      source_name: repoName,
-      text: `Engineering implementation and modular design patterns in ${repoName}.`,
-      locator: "src/main",
-      score: 0.88,
-      verified_contribution: true
-    }
-  ];
-  setItem(KEY_CHUNKS, [...newChunks, ...existingChunks]);
-
-  if (projectId) {
-    const projects = getStoredProjects().map(p => p.id === projectId ? { ...p, source_count: p.source_count + 1 } : p);
-    setItem(KEY_PROJECTS, projects);
-  }
-
-  return source;
+  void projectId; void url;
+  throw new Error("Repository import requires the full backend. Upload the repository's README or source files to this browser workspace instead.");
 }
 
 export function deleteStoredSource(id: string): void {
@@ -344,6 +302,7 @@ export function deleteStoredSource(id: string): void {
   }
   const chunks = getItem<StoredChunk[]>(KEY_CHUNKS, []).filter(c => c.source_id !== id);
   setItem(KEY_CHUNKS, chunks);
+  window.localStorage.removeItem(`interviewpilot_source_content_${id}`);
 }
 
 export function searchStoredEvidence(query: string): Evidence[] {
@@ -351,14 +310,16 @@ export function searchStoredEvidence(query: string): Evidence[] {
   // Filter out any unprintable binary garbage chunks
   const chunks = allChunks.filter(c => !/[\uFFFD]/.test(c.text) && /[a-zA-Z]{4,}/.test(c.text));
 
-  const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !["what", "your", "the", "and", "tell", "about", "for", "with"].includes(w));
-  const isPersonalOrProjectQuery = /(recent|project|projects|work|experience|background|resume|cv|built|implemented|accomplishment|role|career)/i.test(query);
+  const stopWords = new Set(["what", "which", "would", "could", "should", "does", "have", "your", "you", "the", "and", "tell", "about", "for", "with", "explain", "describe", "please", "okay", "how", "can", "are", "was", "were", "this", "that", "from"]);
+  const tokens = (value: string) => value.toLowerCase().match(/[a-z0-9]+(?:\+\+|#)?/g) || [];
+  const words = [...new Set(tokens(query).filter(word => word.length > 2 && !stopWords.has(word) || ["db", "cv", "go", "c++", "c#"].includes(word)))];
+  const isPersonalOrProjectQuery = /\b(recent|projects?|work|experience|background|resume|cv|built|implemented|accomplishment|role|career)\b/i.test(query);
 
   const scored = chunks.map(chunk => {
-    const textLower = (chunk.text + " " + chunk.source_name).toLowerCase();
+    const terms = new Set(tokens(chunk.text + " " + chunk.source_name));
     let score = 0;
     for (const w of words) {
-      if (textLower.includes(w)) score += 0.25;
+      if (terms.has(w)) score += 0.25;
     }
     // If it's a project/experience query, boost chunks from resumes or documents containing project keywords
     if (isPersonalOrProjectQuery) {
@@ -369,35 +330,18 @@ export function searchStoredEvidence(query: string): Evidence[] {
         score += 0.30;
       }
     }
-    return { ...chunk, score: Math.min(0.99, 0.70 + score) };
+    return { ...chunk, verified_contribution: false, score: Math.min(0.99, score) };
   });
 
-  const matching = scored.filter(c => c.score > 0.72).sort((a, b) => b.score - a.score).slice(0, 5);
+  const matching = scored.filter(c => c.score > 0).sort((a, b) => b.score - a.score).slice(0, 5);
   if (matching.length > 0) {
     return matching;
   }
 
   // If the user uploaded sources, return the most informative chunks from their uploaded sources
-  if (chunks.length > 0) {
-    return chunks.slice(0, 3).map(c => ({ ...c, score: 0.90 }));
-  }
+  return [];
 
-  // Fallback to grounded evidence from profile & projects
-  const user = getStoredUser();
-  const projects = getStoredProjects();
-  const primaryProject = projects[0]?.name || "Core Experience";
-  return [
-    {
-      id: "ev_default_1",
-      source_id: "src_core",
-      project_id: projects[0]?.id || null,
-      source_name: primaryProject,
-      text: `${user.name} (${user.preferences?.role || "Software Engineer"}): Demonstrated leadership in architecting resilient systems, optimizing latency, and shipping features.`,
-      score: 0.94,
-      locator: "Portfolio Summary",
-      verified_contribution: true
-    }
-  ];
+
 }
 
 export function getStoredSessions(): Session[] {
@@ -419,7 +363,7 @@ export function createStoredSession(data: { title?: string; audio_mode?: "microp
     created_at: new Date().toISOString(),
     ended_at: null,
     summary: "Live interview assistance session in browser.",
-    metrics: { questions: 0, first_token_ms: 290, total_ms: 1100 },
+    metrics: { questions: 0 },
     turns: []
   };
   const sessions = getStoredSessions();
@@ -459,13 +403,15 @@ export function addTurnToStoredSession(sessionId: string, turn: Turn): void {
   const sessions = getStoredSessions();
   const list = sessions.map(s => {
     if (s.id === sessionId) {
-      const turns = [...(s.turns || []), turn];
+      if (!s.retention) return s;
+      const exists = (s.turns || []).some(item => item.id === turn.id);
+      const turns = exists ? (s.turns || []).map(item => item.id === turn.id ? turn : item) : [...(s.turns || []), turn];
       return {
         ...s,
         turns,
         metrics: {
           ...(s.metrics || {}),
-          questions: (s.metrics?.questions || 0) + 1
+          questions: (s.metrics?.questions || 0) + (!exists && turn.question ? 1 : 0)
         }
       };
     }
@@ -562,9 +508,7 @@ export async function handleBrowserStorageRequest<T>(path: string, options: Requ
   // /sources/:id/retry
   const retryMatch = cleanPath.match(/^\/sources\/([^/]+)\/retry$/);
   if (retryMatch && method === "POST") {
-    const sources = getStoredSources().map(s => s.id === retryMatch[1] ? { ...s, status: "ready" as const, error: null } : s);
-    setItem(KEY_SOURCES, sources);
-    return { ok: true } as T;
+    throw new Error("Upload the document again to retry text extraction.");
   }
 
   // /sources/:id
@@ -590,7 +534,7 @@ export async function handleBrowserStorageRequest<T>(path: string, options: Requ
   // /profile/github/connect
   if (cleanPath === "/profile/github/connect") {
     if (method === "POST") {
-      return { url: "https://github.com/login" } as T;
+      throw new Error("GitHub identity verification requires the full backend.");
     }
     if (method === "DELETE") {
       return updateStoredUser({ github_verified: false, github_verified_username: undefined }) as T;
@@ -638,5 +582,5 @@ export async function handleBrowserStorageRequest<T>(path: string, options: Requ
   }
 
   // Fallback generic response
-  return {} as T;
+  throw new Error(`This operation is unavailable in the browser workspace: ${method} ${cleanPath}`);
 }

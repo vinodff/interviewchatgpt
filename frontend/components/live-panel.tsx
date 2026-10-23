@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { AudioLines, BookOpen, Check, ChevronDown, Clock3, Headphones, Mic, MonitorUp, Radio, ShieldCheck, Square, Waves } from "lucide-react";
+import { isBrowserWorkspace } from "@/lib/workspace-mode";
 import { messageOf } from "@/lib/api";
 import { LiveController, type LocalEvent } from "@/lib/live-controller";
 import { initialLiveState, reduceLiveMessage, type LiveMessage, type LiveState } from "@/lib/protocol";
 import { ANSWER_HEIGHT_DEFAULT, ANSWER_HEIGHT_KEY, ANSWER_HEIGHT_MAX, ANSWER_HEIGHT_MIN, answerHeightFromDrag, answerHeightFromKey, clampAnswerHeight, displayedAnswerHeight, readAnswerHeight } from "@/lib/mobile-live-layout";
 import type { Health, Session, Source, User } from "@/lib/types";
 import type { AudioMode } from "@/lib/capture";
+import type { MicrophoneLevel } from "@/lib/enhanced-recognition";
+import { questionOptionKey } from "@/lib/question-options";
 import { LiveAnswerPreferences } from "./answer-preferences";
 import { AnswerReader, type ReaderCompletion, type ReaderSpeech } from "./answer-reader";
 import { Alert, Button, EvidenceList, SectionHeader } from "./ui";
 
 const subscribeCaptureCapability = () => () => {};
-const tabCaptureSnapshot = () => typeof navigator.mediaDevices?.getDisplayMedia === "function";
+const tabCaptureSnapshot = () => !isBrowserWorkspace() && typeof navigator.mediaDevices?.getDisplayMedia === "function";
 const serverCaptureSnapshot = () => false;
 
 type LivePanelProps = {
@@ -23,6 +26,9 @@ type LivePanelProps = {
 export function LivePanel({ sources, health, user, mobile, visible, toolbar, alerts, onUser, onAnswerHeight, onViewportHeight, onActive, onSession }: LivePanelProps) {
   const [state, setState] = useState<LiveState>(initialLiveState);
   const [mode, setMode] = useState<AudioMode>("microphone");
+  const [microphoneEngine, setMicrophoneEngine] = useState("streaming");
+  const [microphoneLevel, setMicrophoneLevel] = useState<MicrophoneLevel | null>(null);
+  const browserWorkspace = useSyncExternalStore(subscribeCaptureCapability, isBrowserWorkspace, serverCaptureSnapshot);
   const tabCaptureAvailable = useSyncExternalStore(subscribeCaptureCapability, tabCaptureSnapshot, serverCaptureSnapshot);
   const [consent, setConsent] = useState(false);
   const [retention, setRetention] = useState(true);
@@ -98,6 +104,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
 
   function notify(event: LiveMessage | LocalEvent) {
     if (!mounted.current) return;
+    if (event.type === "local" && event.level) { setMicrophoneLevel(event.level); return; }
     if (event.type === "question") {
       readerGeneration.current = event.generation_id; setReaderCompletion(null); setReaderSpeech(null);
     } else if (event.type === "answer_complete" && event.generation_id === readerGeneration.current) {
@@ -121,7 +128,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
   }
   function start() {
     if (!consent || active) return;
-    setState({ ...initialLiveState, phase: "capturing" }); setStarted(Date.now()); setElapsed(0);
+    setIsLocked(false); setMicrophoneLevel(null); setState({ ...initialLiveState, phase: "capturing" }); setStarted(Date.now()); setElapsed(0);
     readerGeneration.current = null; latestReaderSpeech.current = null; setReaderSpeech(null); setReaderCompletion(null);
     if (mobile) setCaptureOpen(false);
     try {
@@ -129,12 +136,13 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
       live.setPreferences(user.preferences);
       controller.current = live;
       // Capture permissions remain in Start's user gesture, including on mobile.
-      void live.start(mode, title, retention);
+      void live.start(mode, title, retention, { enhancedMicrophone: microphoneEngine === "enhanced", streamingMicrophone: microphoneEngine === "streaming" });
     } catch (error) { setState(current => ({ ...current, phase: "ended", error: messageOf(error) })); }
   }
   function askManualQuestion(text: string) {
     const q = text.trim();
     if (!q) return;
+    if (isLocked) { setIsLocked(false); controller.current?.setAnswerLocked(false); }
     controller.current?.askQuestion(q);
     setManualInput("");
   }
@@ -146,11 +154,11 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
   const status = { idle: "Ready when you are", capturing: "Waiting for permission", connecting: "Connecting", listening: "Listening live", reconnecting: "Reconnecting", ended: "Session stopped" }[state.phase];
   const time = `${Math.floor(elapsed / 60).toString().padStart(2, "0")}:${(elapsed % 60).toString().padStart(2, "0")}`;
   const style = { "--answer-height": `${visibleAnswerHeight}%`, ...(mobile && viewportHeight ? { "--live-viewport-height": `${viewportHeight}px` } : {}) } as CSSProperties;
-  const stopButton = <Button variant="danger" className={mobile ? "mobile-stop" : "wide"} onClick={() => { void controller.current?.stop(); }}><Square size={15} fill="currentColor" /> Stop session</Button>;
+  const stopButton = <Button variant="danger" className={mobile ? "mobile-stop" : "wide"} onClick={() => { void controller.current?.stop(); }}><Square size={15} fill="currentColor" /> End interview</Button>;
 
   return <div ref={layout} className="live-workspace" style={style}>
     <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{state.announcement}</div>
-    <div className="live-desktop-heading"><SectionHeader eyebrow="YOUR VOICE. YOUR EVIDENCE." title="Live workspace" description="Stay in the conversation. Relevant context arrives as questions are spoken." action={<div className={`live-state-label ${state.phase === "listening" ? "is-live" : ""}`} role="status"><span className="status-dot" />{status}</div>} /></div>
+    <div className="live-desktop-heading"><SectionHeader eyebrow="YOUR VOICE. YOUR EVIDENCE." title="Live interview" description="Stay in the conversation. Relevant context arrives as questions are spoken." action={<div className={`live-state-label ${state.phase === "listening" ? "is-live" : ""}`} role="status"><span className="status-dot" />{status}</div>} /></div>
 
     <section ref={answerPane} id="live-answer-pane" className="live-answer-region answer-panel" aria-label="Suggested answer" tabIndex={0}>
       <div className="answer-body">{state.answer ? <>
@@ -202,31 +210,35 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
 
       <div className="live-lower-scroll" tabIndex={mobile ? 0 : undefined} aria-label={mobile ? "Scrollable live controls" : undefined}>
         {Object.entries(state.transcriptionWarnings).map(([channel, message]) => <Alert key={channel} tone="info">{message}</Alert>)}
-        <div className="live-alerts">{alerts}{state.error && !state.error.toLowerCase().includes("unavailable") && <Alert>{state.error}</Alert>}{health?.ai_configured === false && <Alert tone="info">The AI provider is not configured. Add the server’s Gemini API key before starting a session.</Alert>}{!minutesAvailable && <Alert tone="info">Your monthly live allowance has been used. Visit Plan & billing to manage your subscription.</Alert>}</div>
+        <div className="live-alerts">{alerts}{state.error && <Alert>{state.error}</Alert>}{health?.ai_configured === false && <Alert tone="info">Live answers are unavailable right now. Try again later or contact support.</Alert>}{!minutesAvailable && <Alert tone="info">You’ve used your live minutes for this month. View Plans &amp; billing for your options.</Alert>}</div>
         <aside className="live-control">
           <details className="panel capture-panel live-collapsible" open={!mobile || captureOpen} onToggle={event => { if (mobile) setCaptureOpen(event.currentTarget.open); }}>
-            <summary><Headphones size={18} /><span>{active ? "Connection details" : "Capture setup"}</span><ChevronDown size={17} /></summary>
+            <summary><Headphones size={18} /><span>{active ? "Interview audio" : "Interview setup"}</span><ChevronDown size={17} /></summary>
             <div className="panel-heading"><h2>{active ? "Your connection" : "Before you go live"}</h2><Headphones size={18} /></div>
             {!active ? <>
-              <label className="standalone-label">Conversation title <span className="muted">(optional)</span><input value={title} onChange={event => setTitle(event.target.value)} maxLength={200} placeholder="e.g. Product engineering interview" /></label>
-              <fieldset className="audio-fieldset"><legend>How should we listen?</legend>
+              <fieldset className="audio-fieldset"><legend>Choose your audio</legend>
                 {tabCaptureAvailable && <label className={`audio-option ${mode === "tab" ? "selected" : ""}`}><input type="radio" name="audio-mode" value="tab" checked={mode === "tab"} onChange={() => setMode("tab")} /><MonitorUp size={20} /><span><strong>Browser tab + microphone</strong><small>Interviewer and you, separately</small></span>{mode === "tab" && <Check size={15} />}</label>}
-                <label className={`audio-option ${mode === "microphone" ? "selected" : ""}`}><input type="radio" name="audio-mode" value="microphone" checked={mode === "microphone"} onChange={() => setMode("microphone")} /><Mic size={20} /><span><strong>Microphone only</strong><small>Room audio, mixed speakers</small></span>{mode === "microphone" && <Check size={15} />}</label>
+                <label className={`audio-option ${mode === "microphone" ? "selected" : ""}`}><input type="radio" name="audio-mode" value="microphone" checked={mode === "microphone"} onChange={() => setMode("microphone")} /><Mic size={20} /><span><strong>Microphone only</strong><small>Use your device microphone</small></span>{mode === "microphone" && <Check size={15} />}</label>
               </fieldset>
-              <div className="capture-guidance">{mode === "tab" ? <><MonitorUp size={17} /><p>Desktop Chrome or Edge: select your meeting tab and enable <strong>Share tab audio</strong>. You’ll also allow your microphone. Keep the shared tab open.<br /><small>A video track is required by the browser; no video frames are transmitted.</small></p></> : <><Mic size={17} /><p>Works on supported mobile and desktop browsers. The microphone must hear the conversation.<br /><small>With headphones, it may not hear remote participants. Mixed audio cannot reliably identify speakers.</small></p></>}</div>
-              <label className="checkbox-label retention-label"><input type="checkbox" checked={retention} onChange={event => setRetention(event.target.checked)} /><span><strong>Keep session text</strong><small>Save transcripts and answers in session history.</small></span></label>
-              <div className="consent-box"><ShieldCheck size={19} /><p>Live assistance must be authorized.</p><label className="checkbox-label"><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /><span>All participants know about and agree to this live AI assistance. I’m authorized to share the conversation.</span></label></div>
-              <Button className="wide" disabled={!consent || health?.ai_configured === false || !minutesAvailable} onClick={start}><Radio size={18} /> Start live session <ArrowIcon /></Button><p className="audio-privacy">Raw audio is never saved. You can stop at any time.</p>
+              <div className="capture-guidance">{mode === "tab" ? <><MonitorUp size={17} /><p>Select your interview tab and enable <strong>Share tab audio</strong>. Keep that tab open.</p></> : <><Mic size={17} /><p>Your microphone needs to hear the interviewer. Headphones may prevent this.</p></>}</div>
+              <details className="capture-advanced"><summary>Audio options &amp; interview name</summary><label className="standalone-label">Interview name <span className="muted">(optional)</span><input value={title} onChange={event => setTitle(event.target.value)} maxLength={200} placeholder="e.g. Frontend developer interview" /></label>
+                {browserWorkspace && <label className="voice-recognition-field"><span>Speech recognition</span><select value={microphoneEngine} onChange={event => setMicrophoneEngine(event.target.value)}><option value="streaming">Live recognition · recommended</option><option value="enhanced">Short recordings · backup</option><option value="standard">Browser recognition</option></select><small className="muted">Try a backup if live recognition cannot connect. Audio is sent to the selected transcription service while listening.</small></label>}
+                <p className="muted small">Keep this page open during the interview. On mobile, switching apps or locking your screen may interrupt audio. Shared-tab audio works only in compatible desktop browsers.</p>
+              </details>
+              <label className="checkbox-label retention-label"><input type="checkbox" checked={retention} onChange={event => setRetention(event.target.checked)} /><span><strong>Save interview text</strong><small>Keep questions and answers in Past interviews.</small></span></label>
+              <div className="consent-box"><ShieldCheck size={19} /><p>Before you start</p><label className="checkbox-label"><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /><span>All participants agree to AI assistance, and the interview rules allow it.</span></label></div>
+              <Button className="wide" disabled={!consent || health?.ai_configured !== true || !minutesAvailable} onClick={start}><Radio size={18} /> Start live interview <ArrowIcon /></Button><p className="audio-privacy">{health === null ? "Checking the interview service…" : "The app does not save audio recordings. You can stop at any time."}</p>
             </> : <>
               <div className="live-clock"><span className={state.phase === "listening" ? "recording-dot" : "waiting-dot"} />{time}<span>SESSION TIME</span></div>
               <div className="connection-row"><MonitorUp size={17} /><span>{mode === "tab" ? "Tab audio · interviewer" : "Microphone · mixed speakers"}</span><span className="channel-label">CH 0</span></div>
               {mode === "tab" && <div className="connection-row"><Mic size={17} /><span>Microphone · you</span><span className="channel-label">CH 1</span></div>}
               <p className="capture-status" role="status">{state.detail || "The assistant is listening for interview questions."}</p>
+              {browserWorkspace && microphoneEngine !== "standard" && <div className="microphone-meter"><label htmlFor="microphone-input-level">Microphone input</label><meter id="microphone-input-level" min={0} max={1} value={microphoneLevel ? Math.max(0, Math.min(1, (20 * Math.log10(Math.max(0.000001, microphoneLevel.rms)) + 80) / 80)) : 0} /><p className="muted small">{!microphoneLevel ? "Waiting for microphone input…" : microphoneLevel.rms < 0.00012 ? "Almost silent — move the microphone closer or raise the interviewer's speaker volume." : microphoneLevel.peak > 0.95 ? "Very loud — move slightly farther from the microphone." : microphoneLevel.rms < 0.002 ? "Quiet input — amplification is enabled." : "Audio is reaching the microphone."}{microphoneLevel && ` Input gain: ${microphoneLevel.gain.toFixed(1)}×.`}</p></div>}
               {!mobile && stopButton}<p className="audio-privacy">{retention ? "Session text will be retained." : "Session text will not be retained."} Audio is never stored.</p>
             </>}
           </details>
 
-          <details className="panel live-options-panel live-collapsible" open={!mobile || optionsOpen} onToggle={event => { if (mobile) setOptionsOpen(event.currentTarget.open); }}>
+          <details className="panel live-options-panel live-collapsible" open={optionsOpen} onToggle={event => setOptionsOpen(event.currentTarget.open)}>
             <summary><Waves size={18} /><span>Answer options</span><ChevronDown size={17} /></summary>
             <div className="panel-heading"><h2>Answer options</h2><Waves size={18} /></div>
             <LiveAnswerPreferences user={user} onUser={onUser} />
@@ -237,7 +249,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
             <summary><BookOpen size={18} /><span>Connected context · {readySources.length}</span><ChevronDown size={17} /></summary>
             <div className="panel-heading"><h2>Connected context</h2><BookOpen size={18} /></div>
             <div className="context-count"><strong>{readySources.length}</strong><span>ready knowledge sources</span></div>
-            {readySources.length ? <div className="context-sources">{readySources.slice(0, 4).map(source => <p key={source.id}><span className="status-dot" />{source.name}</p>)}{readySources.length > 4 && <small>+{readySources.length - 4} more sources</small>}</div> : <p className="muted small">{user.preferences?.grounding === "strict" ? "Upload knowledge to support answers. In this mode, unsupported questions will be identified instead of answered from general context." : "Add sources to the Knowledge library for answers grounded in your experience. Without sources, answers use general context."}</p>}
+            {readySources.length ? <div className="context-sources">{readySources.slice(0, 4).map(source => <p key={source.id}><span className="status-dot" />{source.name}</p>)}{readySources.length > 4 && <small>+{readySources.length - 4} more sources</small>}</div> : <p className="muted small">{user.preferences?.grounding === "strict" ? "Upload knowledge to support answers. In this mode, unsupported questions will be identified instead of answered from general context." : "Add sources to the Resume & projects for answers grounded in your experience. Without sources, answers use general context."}</p>}
             <div className="context-preferences"><span>{user.preferences?.company || "No target company"}</span><span>{user.preferences?.role || "Role not specified"}</span><span>{user.preferences?.language || "English"}</span><span>{user.preferences?.answer_tone || "professional"}</span><span>{user.preferences?.grounding === "strict" ? "Uploaded knowledge only" : "Personal + technical context"}</span></div>
             {state.memory && <details className="memory-details"><summary>Conversation memory <ChevronDown size={14} /></summary><p>{state.memory}</p></details>}
           </details>
@@ -257,7 +269,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
               <h2>{state.question || (active ? "Listening for the next question…" : "Great answers start with listening.")}</h2>
               {!state.question && <p>{active ? "Questions are detected automatically as the conversation unfolds. You can also ask or tap a question below." : "Start an authorized live session. We’ll recognize spoken questions and connect them to your knowledge."}</p>}
               {state.keywords.length > 0 && <div className="keyword-list">{state.keywords.map(word => <span key={word}>{word}</span>)}</div>}
-              {active && (
+              {active && browserWorkspace && (
                 <div style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
                   <form
                     onSubmit={e => {
@@ -268,11 +280,13 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
                   >
                     <input
                       type="text"
+                      aria-label="Ask a question"
                       value={manualInput}
                       onChange={e => setManualInput(e.target.value)}
                       placeholder="Ask or type a question (e.g. what is list)…"
                       style={{
                         flex: 1,
+                        minWidth: 0,
                         padding: "7px 11px",
                         fontSize: "12px",
                         borderRadius: "5px",
@@ -300,27 +314,13 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
                       Ask
                     </button>
                   </form>
-                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-                    <span style={{ fontSize: "11px", color: "#a0b89a", fontWeight: 500 }}>Quick topics:</span>
-                    {["What is a list?", "Explain React hooks", "QuickSort vs MergeSort", "System design basics", "Tell me about yourself"].map(topic => (
-                      <button
-                        key={topic}
-                        type="button"
-                        onClick={() => askManualQuestion(topic)}
-                        style={{
-                          fontSize: "11px",
-                          padding: "3px 8px",
-                          borderRadius: "4px",
-                          border: "1px solid #375344",
-                          background: "#1b332b",
-                          color: "#bedbb4",
-                          cursor: "pointer",
-                          transition: "all 0.15s ease"
-                        }}
-                      >
-                        {topic}
-                      </button>
-                    ))}
+                  <div className="recent-questions" role="group" aria-label="Recent questions">
+                    <p className="muted small">Recent questions &amp; topics · select to answer</p>
+                    {state.recentQuestions.length ? <div className="recent-question-options">{[...state.recentQuestions].reverse().map(option => <button
+                      key={option.id} type="button" className="recent-question-option"
+                      aria-label={`Answer: ${option.question}`} aria-pressed={questionOptionKey(option.question) === questionOptionKey(state.question)}
+                      title={option.confirmed ? "Detected question — select to answer again" : "Possible question heard in the conversation — select to answer"}
+                      onClick={() => askManualQuestion(option.question)}>{option.question}{!option.confirmed && <small>Heard</small>}</button>)}</div> : <p className="muted small">Questions and short topics appear here as you speak.</p>}
                   </div>
                 </div>
               )}
@@ -333,7 +333,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
           </details>
           <details className="panel transcript-panel live-collapsible" open={!mobile || transcriptOpen} onToggle={event => { if (mobile) setTranscriptOpen(event.currentTarget.open); }}>
             <summary><Mic size={18} /><span>Conversation transcript</span><ChevronDown size={17} /></summary>
-            <div className="panel-heading"><div><h2>Conversation</h2><span className="muted small">{mode === "tab" ? "Separate audio channels" : "Smart speaker detection · question vs candidate speech"}</span></div><span className="transcript-live"><span className="status-dot" />{active ? "LIVE TRANSCRIPT" : "TRANSCRIPT"}</span></div>
+            <div className="panel-heading"><div><h2>Conversation</h2><span className="muted small">{mode === "tab" ? "Separate audio channels" : "Contextual question detection · speaker estimates"}</span></div><span className="transcript-live"><span className="status-dot" />{active ? "LIVE TRANSCRIPT" : "TRANSCRIPT"}</span></div>
             <div ref={transcripts} className="transcript-log" role="log" aria-label="Live conversation transcript" aria-live="polite" aria-relevant="additions">{state.transcripts.length ? state.transcripts.map(turn => <div className={`transcript-turn transcript-${turn.role} ${turn.final ? "" : "partial"}`} key={turn.id}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}><span>{turn.role === "interviewer" ? "Interviewer" : turn.role === "user" ? "You" : "Speaker uncertain"}</span>{turn.timestamp && <span style={{ fontSize: "11px", opacity: 0.65, fontVariantNumeric: "tabular-nums", letterSpacing: "0.02em" }}>{turn.timestamp}</span>}</div><p>{turn.text}{!turn.final && <span className="typing-caret" aria-hidden="true" />}</p></div>) : <div className="transcript-empty"><Mic size={21} /><p>{active ? "Recognized speech will appear here." : "Your conversation transcript will appear once audio starts."}</p></div>}</div>
             {Object.keys(state.metrics).length > 0 && <div className="live-metrics"><span>{state.metrics.questions || 0} questions</span><span>{state.metrics.reconnects || 0} reconnects</span><span>{(state.metrics.audio_dropped || 0) + (state.metrics.client_audio_dropped || 0)} audio blocks dropped</span>{state.metrics.first_token_ms !== undefined && <span>First token: {state.metrics.first_token_ms}ms</span>}</div>}
           </details>

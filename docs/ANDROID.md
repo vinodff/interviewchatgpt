@@ -20,7 +20,7 @@ You can also copy the APK to the phone and permit installation from your chosen 
 
 ## Hosted connection
 
-Use Android Back, then **Connection settings**, to enter the root HTTPS address of an InterviewPilot deployment. The release host accepts HTTPS only; the test build additionally permits loopback HTTP. HTTP LAN addresses are rejected because microphone capture requires a secure context. Certificates must be valid; SSL errors are never bypassed.
+Use Android Back, then **Connection settings**, to enter the root HTTPS address of an InterviewWin deployment. The release host accepts HTTPS only; the test build additionally permits loopback HTTP. HTTP LAN addresses are rejected because microphone capture requires a secure context. Certificates must be valid; SSL errors are never bypassed.
 
 Deploy using `DEPLOYMENT.md`, with `LOCAL_TEST_MODE=false`. Configure frontend `NEXT_PUBLIC_WS_URL` to the deployment's `wss://` endpoint, or leave it empty for a same-origin reverse proxy, before building the frontend. The currently running local frontend is compiled for `ws://localhost:8001`; it cannot serve remote HTTPS unchanged. The APK stores the address, and regular cookies/access controls handle hosted accounts. Hosted use needs no USB debugging.
 

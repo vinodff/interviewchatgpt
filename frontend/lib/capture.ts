@@ -9,7 +9,7 @@ export class AudioCapture {
   readonly ready: Promise<void>;
 
   // Construct synchronously in a click handler: permission calls precede any HTTP request.
-  constructor(mode: AudioMode, private onPacket: (packet: ArrayBuffer) => void, private onEnded: (message: string) => void) {
+  constructor(mode: AudioMode, private onPacket: (packet: ArrayBuffer) => void, private onEnded: (message: string) => void, options: { enhanced?: boolean } = {}) {
     if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) throw new Error("Live audio needs a secure browser with microphone and AudioWorklet support.");
     if (mode === "tab" && !navigator.mediaDevices.getDisplayMedia) throw new Error("Tab audio is supported in desktop Chrome or Edge. Choose microphone on this browser.");
     this.context = new AudioContext({ latencyHint: "interactive" });
@@ -22,7 +22,9 @@ export class AudioCapture {
       void resume.catch(() => undefined);
       display = mode === "tab" ? this.track(navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })) : null;
       void display?.catch(() => undefined);
-      microphone = this.track(navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }));
+      // Enhanced room capture should retain quiet remote voices from speakers.
+      // It never plays captured audio, so no monitoring feedback loop is created.
+      microphone = this.track(navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: !options.enhanced, noiseSuppression: !options.enhanced, autoGainControl: true }, video: false }));
       void microphone.catch(() => undefined);
     } catch (error) { this.stop(); throw error; }
     this.context.onstatechange = () => {

@@ -3,71 +3,32 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CS
 import { ArrowRight, AudioLines, BookOpen, Check, ChevronRight, Clock3, CreditCard, FileText, Folder, LayoutDashboard, LogOut, Menu, Radio, RefreshCw, ShieldCheck, UserRound, X } from "lucide-react";
 import { api, ApiError, formatDate, messageOf, post } from "@/lib/api";
 import type { Health, Project, Session, Source, User } from "@/lib/types";
-import { Brand } from "./auth";
+import { supabase } from "@/lib/supabase";
+import { Auth, Brand } from "./auth";
 import { Alert, Button, Empty, SectionHeader } from "./ui";
 import { Library } from "./library";
 import { History } from "./history";
-import { Profile, Billing } from "./settings";
+import { Profile } from "./settings";
+import { Billing } from "./billing";
 import { LivePanel } from "./live-panel";
-import { getStoredHealth, getStoredProjects, getStoredSessions, getStoredSources, getStoredUser } from "@/lib/browser-storage";
+import { interviewUrl, interviewView, type InterviewView } from "@/lib/interview-navigation";
 
-type Page = "overview" | "live" | "library" | "history" | "profile" | "billing";
+type Page = InterviewView;
 const mobileQuery = "(max-width:760px)";
 function subscribeMobile(change: () => void) { const media = window.matchMedia(mobileQuery); media.addEventListener("change", change); return () => media.removeEventListener("change", change); }
 const navigation = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "live", label: "Live workspace", icon: Radio },
-  { id: "library", label: "Knowledge library", icon: BookOpen },
-  { id: "history", label: "Session history", icon: Clock3 },
-  { id: "profile", label: "Your profile", icon: UserRound },
-  { id: "billing", label: "Plan & billing", icon: CreditCard },
+  { id: "overview", label: "My interviews", icon: LayoutDashboard },
+  { id: "live", label: "Live interview", icon: Radio },
+  { id: "library", label: "Resume & projects", icon: BookOpen },
+  { id: "history", label: "Past interviews", icon: Clock3 },
+  { id: "profile", label: "My profile", icon: UserRound },
+  { id: "billing", label: "Plans & billing", icon: CreditCard },
 ] as const;
 
-const DEFAULT_TEST_USER: User = {
-  id: "test-user",
-  email: "candidate@workspace.local",
-  name: "Candidate",
-  plan: "free",
-  github_username: "",
-  github_verified: false,
-  profile: {
-    "Target Focus": "Software Engineering & Technical Leadership",
-    "Testing Mode": "Active (Zero Login Required)",
-    "Notice": "Workspace is running in instant testing mode without sign in."
-  },
-  preferences: {
-    role: "Senior Software Engineer",
-    company: "",
-    language: "English",
-    answer_style: "concise",
-    answer_tone: "professional",
-    grounding: "balanced",
-    english_level: "everyday",
-    reading_mode: "auto",
-    reading_wpm: 155,
-    response_delivery: "natural",
-    personalization: "grounded",
-    answer_text_size: 17,
-    answer_font: "system",
-    answer_theme: "default"
-  },
-  minutes_used: 0,
-  minute_limit: null,
-  testing_mode: true
-};
-
-function getInitialUser(): User {
-  try {
-    return getStoredUser();
-  } catch {
-    return DEFAULT_TEST_USER;
-  }
-}
-
-export function Workspace() {
-  const [user, setUser] = useState<User>(getInitialUser);
+export function Workspace({ initialPage = "overview", initialRegister = false, initialPlan }: { initialPage?: Page; initialRegister?: boolean; initialPlan?: "starter" | "pro" | "value" }) {
+  const [user, setUser] = useState<User | null>(null);
   const [initial, setInitial] = useState(true);
-  const [page, setPage] = useState<Page>("overview");
+  const [page, setPage] = useState<Page>(initialPage);
   const [menu, setMenu] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
@@ -107,88 +68,33 @@ export function Workspace() {
     if (dataRequest.current === request) refreshInFlight.current = false;
     if (request.signal.aborted || epoch !== authEpoch.current) return;
 
-    let finalProjects: Project[] = [];
-    try { finalProjects = getStoredProjects(); } catch { /* ignore */ }
-    if (results[0].status === "fulfilled" && Array.isArray(results[0].value) && results[0].value.length > 0) {
-      const existingIds = new Set(finalProjects.map(p => p.id));
-      for (const p of results[0].value) {
-        if (!existingIds.has(p.id)) finalProjects.push(p);
-      }
-    }
-    setProjects(finalProjects);
-
-    let finalSources: Source[] = [];
-    try { finalSources = getStoredSources(); } catch { /* ignore */ }
-    if (results[1].status === "fulfilled" && Array.isArray(results[1].value) && results[1].value.length > 0) {
-      const existingIds = new Set(finalSources.map(s => s.id));
-      for (const s of results[1].value) {
-        if (!existingIds.has(s.id)) finalSources.push(s);
-      }
-    }
-    setSources(finalSources);
-
-    let finalSessions: Session[] = [];
-    try { finalSessions = getStoredSessions(); } catch { /* ignore */ }
-    if (results[2].status === "fulfilled" && Array.isArray(results[2].value) && results[2].value.length > 0) {
-      const existingIds = new Set(finalSessions.map(s => s.id));
-      for (const s of results[2].value) {
-        if (!existingIds.has(s.id)) finalSessions.push(s);
-      }
-    }
-    setSessions(finalSessions);
-
+    if (results[0].status === "fulfilled") setProjects(results[0].value);
+    if (results[1].status === "fulfilled") setSources(results[1].value);
+    if (results[2].status === "fulfilled") setSessions(results[2].value);
     if (results[3].status === "fulfilled") {
       const me = results[3].value;
       if (me.id !== identity.current) {
         authEpoch.current++; setAuthVersion(authEpoch.current); identity.current = me.id; setNotice("");
       }
-      let stored: User | null = null;
-      try { stored = getStoredUser(); } catch { /* ignore */ }
-      setUser({
-        ...me,
-        preferences: {
-          ...(me.preferences || {}),
-          ...(stored?.preferences || {})
-        }
-      });
-    } else {
-      setUser(prev => prev || getInitialUser());
+      setUser(me);
+    } else if (results[3].reason instanceof ApiError && results[3].reason.status === 401) {
+      identity.current = null; setUser(null); setProjects([]); setSources([]); setSessions([]);
     }
-
-    if (results[4].status === "fulfilled") {
-      setHealth(results[4].value);
-    } else {
-      try { setHealth(getStoredHealth()); } catch { /* ignore */ }
-    }
-
-    let failure = "";
-    results.forEach(result => {
-      if (result.status === "rejected") {
-        const reason = result.reason;
-        const isOfflineOrFallback = !(reason instanceof ApiError) || [0, 401, 404, 410, 500, 502, 503, 504].includes(reason.status);
-        if (!isOfflineOrFallback) {
-          const msg = messageOf(reason);
-          if (!msg.toLowerCase().includes("unavailable") && !msg.toLowerCase().includes("not accepted")) {
-            failure = msg;
-          }
-        }
-      }
-    });
+    if (results[4].status === "fulfilled") setHealth(results[4].value);
+    const rejected = results.find(result => result.status === "rejected");
+    const failure = rejected?.status === "rejected" ? messageOf(rejected.reason) : "";
     setError(failure); setLoading(false);
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    const timer = setTimeout(() => { controller.abort(); }, 1500);
+    const timer = setTimeout(() => { controller.abort(); }, 15000);
     api<User>("/auth/me", { signal: controller.signal }).then(value => {
       identity.current = value.id;
       setUser(value);
       void refresh();
-    }).catch(() => {
-      const testUser = getInitialUser();
-      identity.current = testUser.id;
-      setUser(testUser);
-      void refresh();
+    }).catch(error => {
+      if (!controller.signal.aborted) setError(error instanceof ApiError && error.status === 401 ? "" : messageOf(error));
     }).finally(() => {
       clearTimeout(timer);
       setInitial(false);
@@ -223,16 +129,28 @@ export function Workspace() {
     return () => clearInterval(interval);
   }, [pending, user, refresh]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(""), 6000); return () => clearTimeout(timer); }, [notice]);
+  useEffect(() => {
+    const followHistory = () => { setPage(interviewView(new URLSearchParams(window.location.search).get("view"))); setMenu(false); };
+    window.addEventListener("popstate", followHistory);
+    return () => window.removeEventListener("popstate", followHistory);
+  }, []);
 
-  function navigate(next: Page) { if (next === "billing" && user?.testing_mode) return; setPage(next); setMenu(false); if (mobile) requestAnimationFrame(() => document.getElementById("main-content")?.focus()); }
+  function navigate(next: Page) {
+    if (next !== page) {
+      const target = `${interviewUrl(next)}${initialPlan ? `&plan=${initialPlan}` : ""}`;
+      window.history.pushState(null, "", target);
+    }
+    setPage(next); setMenu(false);
+    if (mobile) requestAnimationFrame(() => document.getElementById("main-content")?.focus());
+  }
   function closeMenu() { setMenu(false); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[aria-label="Open navigation"]')?.focus()); }
   function updateUser(value: User | null) {
     authEpoch.current++; setAuthVersion(authEpoch.current); dataRequest.current?.abort();
-    const nextUser = value || getInitialUser();
-    if (nextUser.id !== identity.current) {
+    const nextUser = value;
+    if (nextUser?.id !== identity.current) {
       setProjects([]); setSources([]); setSessions([]); setNotice(""); setMenu(false); setActive(false);
     }
-    identity.current = nextUser.id;
+    identity.current = nextUser?.id || null;
     setUser(nextUser);
   }
   async function logout() {
@@ -241,17 +159,22 @@ export function Workspace() {
     authEpoch.current++;
     setAuthVersion(authEpoch.current);
     dataRequest.current?.abort();
-    try { await api("/auth/logout", post()); }
-    catch { /* ignore logout failure */ }
-    finally {
+    try {
+      await supabase.auth.signOut().catch(() => {});
+      await api("/auth/logout", post());
+      updateUser(null);
+      setPage("overview");
+      window.history.replaceState(null, "", interviewUrl("overview"));
+    } catch (error) {
+      setError(messageOf(error));
+    } finally {
       authTransition.current = false;
       setLoading(false);
-      updateUser(getInitialUser());
-      setPage("overview");
     }
   }
-  if (initial) return <main className="initial-loader"><Brand /><AudioLines size={30} className="pulse" /><p>Opening your workspace…</p></main>;
-  const visibleNavigation = user.testing_mode ? navigation.filter(item => item.id !== "billing") : navigation;
+  if (initial) return <main className="initial-loader"><Brand /><AudioLines size={30} className="pulse" /><p>Getting your interview ready…</p></main>;
+  if (!user) return <Auth initialRegister={initialRegister} onAuthenticated={value => { updateUser(value); void refresh(); }} serviceError={error} />;
+  const visibleNavigation = navigation;
   const ready = sources.filter(source => source.status === "ready").length;
   const renderEpoch = authVersion;
   function ownedNotice(message: string) { if (renderEpoch === authEpoch.current && identity.current === user?.id) setNotice(message); }
@@ -262,18 +185,18 @@ export function Workspace() {
     // A same-account profile save keeps the live controller and auth identity intact.
     dataRequest.current?.abort(); refreshInFlight.current = false; setLoading(false); setUser(value);
   }
-  const globalAlerts = <>{error && !error.toLowerCase().includes("unavailable") && <div className="global-alert"><Alert>{error}</Alert></div>}{notice && <div className="global-alert"><Alert tone="success">{notice}</Alert></div>}</>;
-  const liveToolbar = <><div className="mobile-live-brand"><AudioLines size={25} aria-hidden="true" /><div><strong>InterviewPilot Live</strong><h1>Live workspace</h1></div></div><nav aria-label="Live workspace navigation"><Button variant="ghost" aria-label="Open navigation" aria-expanded={menu} onClick={() => setMenu(true)}><Menu size={21} /></Button><Button variant="ghost" aria-label="Refresh workspace" busy={loading} onClick={() => { void refresh(); }}><RefreshCw size={17} /></Button><Button variant="ghost" aria-label="Open your profile" onClick={() => navigate("profile")}><UserRound size={19} /></Button></nav></>;
+  const globalAlerts = <>{error && <div className="global-alert"><Alert>{error}</Alert></div>}{notice && <div className="global-alert"><Alert tone="success">{notice}</Alert></div>}</>;
+  const liveToolbar = <><div className="mobile-live-brand"><AudioLines size={25} aria-hidden="true" /><div><strong>InterviewWin Live</strong><h1>Live interview</h1></div></div><nav aria-label="Live interview navigation"><Button variant="ghost" aria-label="Open navigation" aria-expanded={menu} onClick={() => setMenu(true)}><Menu size={21} /></Button><Button variant="ghost" aria-label="Refresh interview" busy={loading} onClick={() => { void refresh(); }}><RefreshCw size={17} /></Button><Button variant="ghost" aria-label="Open your profile" onClick={() => navigate("profile")}><UserRound size={19} /></Button></nav></>;
   async function ownedRefresh() { if (identity.current === user?.id) await refresh(); }
-  return <div className={`workspace ${mobileLive ? "mobile-live" : ""}`} style={{ "--answer-height": `${answerHeight}%`, "--mobile-answer-top": mobileViewportHeight ? `${mobileViewportHeight * answerHeight / 100}px` : `${answerHeight}dvh`, ...(mobileViewportHeight ? { "--live-viewport-height": `${mobileViewportHeight}px` } : {}) } as CSSProperties}><a className="skip-link" href="#main-content">Skip to content</a>{menu && <button className="sidebar-backdrop" aria-label="Close navigation" onClick={closeMenu} />}<aside ref={sidebar} role={mobile ? "dialog" : undefined} aria-modal={mobile && menu || undefined} inert={mobile && !menu || undefined} aria-hidden={mobile && !menu || undefined} className={`sidebar ${menu ? "open" : ""}`} aria-label="Workspace navigation"><div className="sidebar-brand"><Brand /><Button variant="ghost" className="mobile-only" aria-label="Close navigation" onClick={closeMenu}><X size={20} /></Button></div><div className="workspace-label"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><div><strong>{user.name}&apos;s workspace</strong><small>{user.testing_mode ? "Testing · unlimited minutes" : `Personal · ${user.plan}`}</small></div></div><p className="nav-label">WORKSPACE</p><nav>{visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} className={`nav-item ${page === id ? "selected" : ""}`} aria-current={page === id ? "page" : undefined} onClick={() => navigate(id)}><Icon size={19} strokeWidth={1.7} /><span>{label}</span>{id === "live" && active && <span className="status-dot" aria-label="Live session active" />}{id === "library" && sources.length > 0 && <span className="nav-count">{sources.length}</span>}</button>)}</nav><div className="sidebar-bottom"><div className="usage-card">{user.minute_limit === null ? <><div><span>Local testing</span><span>Unlimited minutes</span></div><small>{Math.ceil(user.minutes_used)} minutes used · provider quotas still apply</small></> : <><div><span>{user.plan === "free" ? "Free workspace" : `${user.plan} workspace`}</span><span>{Math.max(0, Math.ceil(user.minute_limit - user.minutes_used))} min left</span></div><progress value={Math.min(user.minutes_used, user.minute_limit)} max={user.minute_limit || 1} aria-label="Monthly live minute usage" /><small>{Math.ceil(user.minutes_used)} of {user.minute_limit} monthly minutes used</small><button onClick={() => navigate("billing")}>Manage your plan <ArrowRight size={14} /></button></>}</div>{!user.testing_mode && <button className="logout-button" onClick={() => { void logout(); }}><LogOut size={17} /> Sign out</button>}<div className="sidebar-fine"><ShieldCheck size={14} /> Private by design</div></div></aside><div className="main-column" inert={mobile && menu || undefined}>{!mobileLive && <header className="topbar"><div><Button variant="ghost" className="mobile-only" aria-label="Open navigation" aria-expanded={menu} onClick={() => setMenu(true)}><Menu size={21} /></Button><span className="breadcrumb">Workspace <ChevronRight size={14} /> <strong>{navigation.find(item => item.id === page)?.label}</strong></span></div><div className="topbar-right"><span className={`service-status ${health?.ai_configured ? "" : "unconfigured"}`}><span className="status-dot" />{health ? health.ai_configured ? "AI configured" : "AI setup needed" : "Checking service"}</span><Button variant="ghost" aria-label="Refresh workspace" busy={loading} onClick={() => { void refresh(); }}><RefreshCw size={17} /></Button><button className="avatar avatar-button" aria-label="Open your profile" onClick={() => navigate("profile")}>{user.name.slice(0, 1).toUpperCase()}</button></div></header>}<main id="main-content" className="main-content" tabIndex={-1}>{!mobileLive && globalAlerts}{page === "overview" && <><SectionHeader eyebrow="A LITTLE PREPARATION. A BETTER CONVERSATION." title={`Welcome${user.name ? `, ${user.name.split(" ")[0]}` : " back"}.`} description="Make your experience easy to reach when the conversation gets going." /><section className="overview-hero"><div className="hero-copy"><span className="live-label"><span className="status-dot" /> LIVE ASSISTANCE, GROUNDED IN YOU</span><h2>Be present.<br /><em>We’ll connect the dots.</em></h2><p>Your projects, your experience, and the right evidence — ready as questions come in.</p><Button onClick={() => navigate("live")}><Radio size={18} /> Open live workspace <ArrowRight size={16} /></Button><small><ShieldCheck size={14} /> Starts only after your explicit consent.</small></div><div className="hero-visual" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="orbit orbit-three" /><div className="signal-mark"><AudioLines size={62} strokeWidth={1.2} /></div><div className="orbit-word word-one"><FileText size={14} /> Your sources</div><div className="orbit-word word-two"><Folder size={14} /> Your projects</div><div className="orbit-word word-three">Your voice <AudioLines size={14} /></div></div></section><div className="stat-strip"><div><BookOpen size={20} /><span><strong>{ready}</strong> ready sources</span></div><div><Folder size={20} /><span><strong>{projects.length}</strong> projects</span></div><div><Clock3 size={20} /><span><strong>{sessions.length}</strong> conversations</span></div><div><AudioLines size={20} /><span><strong>{Math.ceil(user.minutes_used)}</strong> minutes this month</span></div></div><div className="overview-columns"><section className="panel"><div className="panel-heading"><h2>Make it yours</h2><span className="muted small">YOUR FOUNDATION</span></div><div className="setup-list">{[
+  return <div className={`workspace ${mobileLive ? "mobile-live" : ""}`} style={{ "--answer-height": `${answerHeight}%`, "--mobile-answer-top": mobileViewportHeight ? `${mobileViewportHeight * answerHeight / 100}px` : `${answerHeight}dvh`, ...(mobileViewportHeight ? { "--live-viewport-height": `${mobileViewportHeight}px` } : {}) } as CSSProperties}><a className="skip-link" href="#main-content">Skip to content</a>{menu && <button className="sidebar-backdrop" aria-label="Close navigation" onClick={closeMenu} />}<aside ref={sidebar} role={mobile ? "dialog" : undefined} aria-modal={mobile && menu || undefined} inert={mobile && !menu || undefined} aria-hidden={mobile && !menu || undefined} className={`sidebar ${menu ? "open" : ""}`} aria-label="Interview navigation"><div className="sidebar-brand"><Brand /><Button variant="ghost" className="mobile-only" aria-label="Close navigation" onClick={closeMenu}><X size={20} /></Button></div><div className="workspace-label"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><div><strong>{user.name}</strong><small>{user.testing_mode ? "Local preview" : `Personal · ${user.plan}`}</small></div></div><p className="nav-label">INTERVIEWS</p><nav>{visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} className={`nav-item ${page === id ? "selected" : ""}`} aria-current={page === id ? "page" : undefined} onClick={() => navigate(id)}><Icon size={19} strokeWidth={1.7} /><span>{label}</span>{id === "live" && active && <span className="status-dot" aria-label="Live session active" />}{id === "library" && sources.length > 0 && <span className="nav-count">{sources.length}</span>}</button>)}</nav><div className="sidebar-bottom"><div className="usage-card">{user.minute_limit === null ? <><div><span>Preview access</span><span>Unlimited minutes</span></div><small>{Math.ceil(user.minutes_used)} minutes used · AI service limits may apply</small></> : <><div><span>{user.plan === "free" ? "Free plan" : `${user.plan} plan`}</span><span>{Math.max(0, Math.ceil(user.minute_limit - user.minutes_used))} min left</span></div><progress value={Math.min(user.minutes_used, user.minute_limit)} max={user.minute_limit || 1} aria-label="Monthly live minute usage" /><small>{Math.ceil(user.minutes_used)} of {user.minute_limit} monthly minutes used</small><button onClick={() => navigate("billing")}>Manage your plan <ArrowRight size={14} /></button></>}</div>{!user.testing_mode && <button className="logout-button" onClick={() => { void logout(); }}><LogOut size={17} /> Sign out</button>}<div className="sidebar-fine"><ShieldCheck size={14} /> Private by design</div></div></aside><div className="main-column" inert={mobile && menu || undefined}>{!mobileLive && <header className="topbar"><div><Button variant="ghost" className="mobile-only" aria-label="Open navigation" aria-expanded={menu} onClick={() => setMenu(true)}><Menu size={21} /></Button><span className="breadcrumb">InterviewWin <ChevronRight size={14} /> <strong>{navigation.find(item => item.id === page)?.label}</strong></span></div><div className="topbar-right"><span className={`service-status ${health?.ai_configured ? "" : "unconfigured"}`}><span className="status-dot" />{health ? health.ai_configured ? "Ready for interviews" : "Live answers unavailable" : "Checking service"}</span><Button variant="ghost" aria-label="Refresh interview" busy={loading} onClick={() => { void refresh(); }}><RefreshCw size={17} /></Button><button className="avatar avatar-button" aria-label="Open your profile" onClick={() => navigate("profile")}>{user.name.slice(0, 1).toUpperCase()}</button></div></header>}<main id="main-content" className="main-content" tabIndex={-1}>{!mobileLive && globalAlerts}{page === "overview" && <><SectionHeader eyebrow="A LITTLE PREPARATION. A BETTER CONVERSATION." title={`Welcome${user.name ? `, ${user.name.split(" ")[0]}` : " back"}.`} description="Make your experience easy to reach when the conversation gets going." /><section className="overview-hero"><div className="hero-copy"><span className="live-label"><span className="status-dot" /> LIVE ASSISTANCE, GROUNDED IN YOU</span><h2>Be present.<br /><em>We’ll connect the dots.</em></h2><p>Your projects, your experience, and the right evidence — ready as questions come in.</p><Button onClick={() => navigate("live")}><Radio size={18} /> Start live interview <ArrowRight size={16} /></Button><small><ShieldCheck size={14} /> Starts only after your explicit consent.</small></div><div className="hero-visual" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="orbit orbit-three" /><div className="signal-mark"><AudioLines size={62} strokeWidth={1.2} /></div><div className="orbit-word word-one"><FileText size={14} /> Your sources</div><div className="orbit-word word-two"><Folder size={14} /> Your projects</div><div className="orbit-word word-three">Your voice <AudioLines size={14} /></div></div></section><div className="stat-strip"><div><BookOpen size={20} /><span><strong>{ready}</strong> ready sources</span></div><div><Folder size={20} /><span><strong>{projects.length}</strong> projects</span></div><div><Clock3 size={20} /><span><strong>{sessions.length}</strong> conversations</span></div><div><AudioLines size={20} /><span><strong>{Math.ceil(user.minutes_used)}</strong> minutes this month</span></div></div><div className="overview-columns"><section className="panel"><div className="panel-heading"><h2>Make it yours</h2><span className="muted small">QUICK SETUP</span></div><div className="setup-list">{[
     { completed: ready > 0, title: "Bring your experience", detail: "Upload a resume, project notes, or portfolio.", page: "library" as Page, icon: FileText },
     { completed: projects.length > 0, title: "Connect your projects", detail: "Add source context and a public GitHub repository.", page: "library" as Page, icon: Folder },
     { completed: !!user.preferences?.role, title: "Set the conversation context", detail: "Your role, language, and preferred answer style.", page: "profile" as Page, icon: UserRound },
-  ].map(({ completed, title, detail, page, icon: Icon }) => <button className="setup-item" key={title} onClick={() => navigate(page)}><span className={`setup-icon ${completed ? "completed" : ""}`}>{completed ? <Check size={19} /> : <Icon size={19} />}</span><span><strong>{title}</strong><small>{detail}</small></span><ChevronRight size={17} /></button>)}</div></section><section className="panel"><div className="panel-heading"><h2>Recent conversations</h2><button className="text-link" onClick={() => navigate("history")}>View all <ArrowRight size={14} /></button></div>{sessions.length ? <div className="recent-list">{sessions.slice(0, 3).map(session => <button key={session.id} onClick={() => navigate("history")}><span className="recent-icon"><AudioLines size={19} /></span><span><strong>{session.title}</strong><small>{formatDate(session.created_at)} · {session.status}</small></span><ChevronRight size={16} /></button>)}</div> : <Empty icon={<Clock3 size={23} />} title="Your next conversation starts here">Completed sessions appear here when transcript retention is enabled.</Empty>}</section></div><div className="privacy-line"><ShieldCheck size={17} /><p>Your knowledge stays in your workspace. Audio is processed live, never saved. Only use live assistance with everyone’s consent.</p></div></>}
+  ].map(({ completed, title, detail, page, icon: Icon }) => <button className="setup-item" key={title} onClick={() => navigate(page)}><span className={`setup-icon ${completed ? "completed" : ""}`}>{completed ? <Check size={19} /> : <Icon size={19} />}</span><span><strong>{title}</strong><small>{detail}</small></span><ChevronRight size={17} /></button>)}</div></section><section className="panel"><div className="panel-heading"><h2>Recent conversations</h2><button className="text-link" onClick={() => navigate("history")}>View all <ArrowRight size={14} /></button></div>{sessions.length ? <div className="recent-list">{sessions.slice(0, 3).map(session => <button key={session.id} onClick={() => navigate("history")}><span className="recent-icon"><AudioLines size={19} /></span><span><strong>{session.title}</strong><small>{formatDate(session.created_at)} · {session.status}</small></span><ChevronRight size={16} /></button>)}</div> : <Empty icon={<Clock3 size={23} />} title="Your next conversation starts here">Completed sessions appear here when transcript retention is enabled.</Empty>}</section></div><div className="privacy-line"><ShieldCheck size={17} /><p>Your resume helps personalize your answers. Audio is processed live, never saved. Only use live assistance with everyone’s consent.</p></div></>}
 {page === "library" && <Library key={user.id} projects={projects} sources={sources} refresh={ownedRefresh} notice={ownedNotice} loading={loading} />}
 {page === "history" && <History key={user.id} sessions={sessions} refresh={ownedRefresh} notice={ownedNotice} loading={loading} />}
 {page === "profile" && <Profile key={user.id} user={user} setUser={ownedUpdateUser} notice={ownedNotice} />}
-{page === "billing" && !user.testing_mode && <Billing key={user.id} user={user} health={health} />}
+{page === "billing" && <Billing key={user.id} user={user} health={health} selectedPlan={initialPlan} />}
 <div hidden={page !== "live"}><LivePanel key={user.id} sources={sources} health={health} user={user} mobile={mobile} visible={page === "live"} toolbar={liveToolbar} alerts={mobileLive ? globalAlerts : null} onUser={ownedUpdateUser} onAnswerHeight={setAnswerHeight} onViewportHeight={setMobileViewportHeight} onActive={setActive} onSession={session => { if (renderEpoch !== authEpoch.current || identity.current !== user.id) return; setSessions(current => [session, ...current.filter(item => item.id !== session.id)]); if (session.status === "ended") void refresh(); }} /></div>
-</main><footer className="main-footer"><span>InterviewPilot Live</span><span>Your experience is the source of truth.</span></footer></div></div>;
+</main><footer className="main-footer"><span>InterviewWin Live</span><nav aria-label="Website resources"><a href="/help" target="_blank" rel="noreferrer">Help</a><a href="/contact" target="_blank" rel="noreferrer">Contact</a><a href="/" target="_blank" rel="noreferrer">Website</a></nav><span>Your experience is the source of truth.</span></footer></div></div>;
 }

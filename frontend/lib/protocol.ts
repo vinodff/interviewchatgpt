@@ -1,4 +1,6 @@
 import type { Evidence } from "./types";
+import { heardQuestionOptions } from "./speech-request";
+import { rememberQuestionOptions, type QuestionOption } from "./question-options";
 
 export type Transcript = { id: string; role: "interviewer" | "user" | "unknown"; text: string; final: boolean; timestamp?: string };
 export type LiveMessage =
@@ -20,8 +22,9 @@ export type LiveState = {
   evidence: Evidence[]; keywords: string[]; transcripts: Transcript[]; memory: string;
   metrics: Record<string, number>; error: string; latency: number | null; answering: boolean; announcement: string;
   transcriptionWarnings: Record<number, string>;
+  recentQuestions: QuestionOption[];
 };
-export const initialLiveState: LiveState = { phase: "idle", detail: "", generation: null, question: "", answer: "", evidence: [], keywords: [], transcripts: [], memory: "", metrics: {}, error: "", latency: null, answering: false, announcement: "", transcriptionWarnings: {} };
+export const initialLiveState: LiveState = { phase: "idle", detail: "", generation: null, question: "", answer: "", evidence: [], keywords: [], transcripts: [], memory: "", metrics: {}, error: "", latency: null, answering: false, announcement: "", transcriptionWarnings: {}, recentQuestions: [] };
 
 export function reduceLiveMessage(state: LiveState, event: LiveMessage): LiveState {
   switch (event.type) {
@@ -38,7 +41,7 @@ export function reduceLiveMessage(state: LiveState, event: LiveMessage): LiveSta
       ...(["ended", "reconnecting"].includes(event.state) ? { answering: false, generation: null, transcriptionWarnings: {} } : {}),
       ...(event.state === "reconnecting" ? { question: "", answer: "", evidence: [], keywords: [], latency: null } : {}),
     };
-    case "question": return { ...state, generation: event.generation_id, question: event.question, answer: "", evidence: [], keywords: event.keywords || [], latency: null, answering: true, announcement: `Question detected: ${event.question}` };
+    case "question": return { ...state, generation: event.generation_id, question: event.question, answer: "", evidence: [], keywords: event.keywords || [], latency: null, answering: true, announcement: `Question detected: ${event.question}`, recentQuestions: rememberQuestionOptions(state.recentQuestions, [event.question], null, true) };
     case "answer_delta": return state.generation === event.generation_id ? { ...state, answer: state.answer + event.text } : state;
     case "answer_complete": return state.generation === event.generation_id ? { ...state, answer: event.answer, evidence: event.evidence || [], keywords: event.keywords || [], latency: event.latency_ms, answering: false, announcement: `Suggested answer ready. ${event.answer.slice(0, 350)}. ${event.evidence?.length || 0} source references attached.` } : state;
     case "answer_cancelled": return state.generation === event.generation_id ? { ...state, generation: null, answering: false, answer: "", evidence: [], latency: null } : state;
@@ -47,7 +50,7 @@ export function reduceLiveMessage(state: LiveState, event: LiveMessage): LiveSta
       if (index >= 0 && state.transcripts[index].final && !event.final) return state;
       const transcripts = [...state.transcripts];
       if (index < 0) transcripts.push(event); else transcripts[index] = event;
-      return { ...state, transcripts: transcripts.slice(-80) };
+      return { ...state, transcripts: transcripts.slice(-80), recentQuestions: rememberQuestionOptions(state.recentQuestions, heardQuestionOptions(event.text), event.id) };
     }
     case "memory": return { ...state, memory: event.summary };
     case "metrics": { const { type: _type, ...metrics } = event; void _type; return { ...state, metrics }; }

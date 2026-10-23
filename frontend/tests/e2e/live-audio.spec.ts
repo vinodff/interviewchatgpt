@@ -8,12 +8,12 @@ test("browser microphone capture automatically produces a grounded Gemini answer
   const headers = { "X-InterviewPilot": "1", Origin: "http://localhost:3001" };
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", { name: "Create account", exact: true }).click();
   await page.getByLabel("Your name").fill("Audio Fixture");
   await page.getByLabel("Email address").fill(`browser-audio-${Date.now()}@example.com`);
   await page.getByLabel("Password", { exact: true }).fill("Browser-audio-fixture-2026!");
-  await page.getByRole("button", { name: "Create my workspace" }).click();
+  await page.getByRole("button", { name: "Create account and continue" }).click();
   await expect(page.getByRole("heading", { name: "Welcome, Audio." })).toBeVisible();
   try {
     const projectResponse = await page.request.post("/api/projects", { headers, data: { name: "EventStream", description: "Temporary labeled browser audio integration fixture" } });
@@ -30,21 +30,22 @@ test("browser microphone capture automatically produces a grounded Gemini answer
       const sources = await response.json();
       return sources.find((entry: { id: string; status: string }) => entry.id === source.id)?.status;
     }, { timeout: 60000 }).toBe("ready");
-    await page.getByRole("button", { name: "Refresh workspace" }).click();
-    await page.getByRole("button", { name: "Live workspace", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh interview" }).click();
+    await page.getByRole("button", { name: "Live interview", exact: true }).click();
     const preferencesForm = page.locator(".live-preference-form");
+    await page.locator(".live-options-panel > summary").click();
+    await preferencesForm.locator(".preference-advanced > summary").click();
     await preferencesForm.getByLabel("English level").selectOption("simple");
     await preferencesForm.getByLabel("Hands-free scrolling").selectOption("auto");
-    await preferencesForm.locator(".preference-advanced > summary").click();
     await preferencesForm.getByLabel("Reading speed").fill("240");
-    await page.getByRole("button", { name: "Save answer preferences" }).click();
-    await expect(preferencesForm.getByText("Saved. Answers update", { exact: false })).toBeVisible();
+    await expect(preferencesForm.getByRole("status")).toContainText("Saved.");
+    await page.locator(".live-options-panel > summary").click();
     await page.getByText("Microphone only", { exact: true }).click();
-    await page.getByLabel("Keep session text").uncheck();
-    await page.getByLabel("All participants know about", { exact: false }).check();
+    await page.getByLabel("Save interview text").uncheck();
+    await page.getByLabel("All participants agree to AI assistance", { exact: false }).check();
     // This is the sole live-workflow action. The browser source is a test WAV; the app's
     // actual AudioWorklet, WebSocket, Gemini transcription, retrieval, and streaming run.
-    await page.getByRole("button", { name: "Start live session" }).click();
+    await page.getByRole("button", { name: "Start live interview" }).click();
     await expect(page.locator(".answer-text")).toContainText(/Redis/i, { timeout: 80000 });
     await expect(page.locator(".answer-evidence .evidence")).not.toHaveCount(0, { timeout: 15000 });
     await expect(page.locator(".transcript-turn").first()).toBeVisible();
@@ -64,7 +65,7 @@ test("browser microphone capture automatically produces a grounded Gemini answer
     expect((await controlsPane.boundingBox())!.y).toBeCloseTo(243.6, 0);
     await expect(answerPane.locator(".answer-text")).toContainText(/Redis/i);
     await expect(answerPane.locator("button,h1,.live-clock,.question-block")).toHaveCount(0);
-    await expect(page.locator(".mobile-live-toolbar")).toContainText("InterviewPilot Live");
+    await expect(page.locator(".mobile-live-toolbar")).toContainText("InterviewWin Live");
     const divider = page.getByRole("separator", { name: "Resize answer area" });
     await expect(divider).toHaveAttribute("aria-valuenow", "30");
     await divider.click();
@@ -81,9 +82,9 @@ test("browser microphone capture automatically produces a grounded Gemini answer
     await expect(divider).toHaveAttribute("aria-valuenow", "40");
     await divider.press("End");
     await expect(divider).toHaveAttribute("aria-valuenow", "70");
-    await expect(page.locator(".mobile-capture-bar").getByRole("button", { name: "Stop session", exact: true })).toBeInViewport();
+    await expect(page.locator(".mobile-capture-bar").getByRole("button", { name: "End interview", exact: true })).toBeInViewport();
     await page.setViewportSize({ width: 375, height: 400 });
-    await expect(page.locator(".mobile-capture-bar").getByRole("button", { name: "Stop session", exact: true })).toBeInViewport();
+    await expect(page.locator(".mobile-capture-bar").getByRole("button", { name: "End interview", exact: true })).toBeInViewport();
     expect(Number(await divider.getAttribute("aria-valuenow"))).toBeLessThan(70);
     await page.setViewportSize({ width: 375, height: 812 });
     await expect(divider).toHaveAttribute("aria-valuenow", "70");
@@ -104,18 +105,17 @@ test("browser microphone capture automatically produces a grounded Gemini answer
     await page.getByLabel("Answer tone").selectOption("friendly");
     await page.getByLabel("Answer sources").selectOption("strict");
     await preferencesForm.getByLabel("English level").selectOption("advanced");
-    await page.getByRole("button", { name: "Save answer preferences" }).click();
-    await expect(preferencesForm.getByText("Preferences saved.", { exact: false })).toBeVisible();
+    await expect(preferencesForm.getByRole("status")).toContainText("Saved.");
     const profile = await (await page.request.get("/api/auth/me")).json();
     expect(profile.preferences.answer_tone).toBe("friendly");
     expect(profile.preferences.grounding).toBe("strict");
     expect(profile.preferences.english_level).toBe("advanced");
     expect(profile.preferences.reading_mode).toBe("auto");
-    await expect(page.getByRole("button", { name: "Start live session" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Start live interview" })).toHaveCount(0);
     await page.locator(".live-options-panel > summary").click();
     await page.locator(".live-lower-scroll").evaluate(element => { element.scrollTop = 0; });
     await page.screenshot({ path: "test-results/live-mobile.png", fullPage: true });
-    await page.getByRole("button", { name: "Stop session", exact: true }).click();
+    await page.getByRole("button", { name: "End interview", exact: true }).click();
     await expect(page.locator(".mobile-capture-bar")).toContainText("Session stopped");
     await expect(answerText.locator('[data-reader-current="true"]')).toHaveCount(0);
     expect(errors).toEqual([]);

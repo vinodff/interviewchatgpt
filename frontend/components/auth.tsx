@@ -1,65 +1,249 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowRight, AudioLines, Check, FileText, LockKeyhole, Radio, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Check, FileText, LockKeyhole, Radio, Sparkles } from "lucide-react";
 import { api, messageOf, post } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 import type { User } from "@/lib/types";
 import { Alert, Button } from "./ui";
+import { Brand } from "./brand";
+export { Brand } from "./brand";
 
-export function Brand({ compact = false }: { compact?: boolean }) {
-  return <div className="brand"><span className="brand-mark"><AudioLines size={23} strokeWidth={1.8} aria-hidden="true" /></span>{!compact && <span>Interview<span className="brand-light">Pilot</span><small>LIVE WORKSPACE</small></span>}</div>;
+function GoogleIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" className="google-icon" style={{ flex: "none" }}>
+      <path
+        fill="#4285F4"
+        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.34 24 12 24z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+      />
+    </svg>
+  );
 }
 
-export function Auth({ onAuthenticated, serviceError }: { onAuthenticated: (user: User) => void; serviceError: string }) {
-  const [register, setRegister] = useState(false);
-  const [recovering, setRecovering] = useState(false);
-  const [resetToken, setResetToken] = useState(() => typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("reset") || "");
+export function Auth({ onAuthenticated, serviceError }: { onAuthenticated: (user: User) => void; serviceError: string; initialRegister?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-  useEffect(() => { if (resetToken) window.history.replaceState(null, "", window.location.pathname); }, [resetToken]);
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setError(""); setSuccess(""); setBusy(true);
+  const [showEmailFallback, setShowEmailFallback] = useState(false);
+
+  // Check and sync Supabase session on mount or return from OAuth redirect
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncSession() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user && !cancelled) {
+          setBusy(true);
+          const user = await api<User>("/auth/supabase-session", post({
+            user_id: session.user.id,
+            email: session.user.email || "",
+            name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || (session.user.email ? session.user.email.split("@")[0] : "User"),
+            access_token: session.access_token,
+          }));
+          if (!cancelled) onAuthenticated(user);
+        }
+      } catch (err) {
+        if (!cancelled) setError(messageOf(err));
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    }
+
+    void syncSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && !cancelled) {
+        setBusy(true);
+        try {
+          const user = await api<User>("/auth/supabase-session", post({
+            user_id: session.user.id,
+            email: session.user.email || "",
+            name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || (session.user.email ? session.user.email.split("@")[0] : "User"),
+            access_token: session.access_token,
+          }));
+          if (!cancelled) onAuthenticated(user);
+        } catch (err) {
+          if (!cancelled) setError(messageOf(err));
+        } finally {
+          if (!cancelled) setBusy(false);
+        }
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, [onAuthenticated]);
+
+  async function handleGoogleSignIn() {
+    setError("");
+    setBusy(true);
+    try {
+      const redirectUrl = typeof window !== "undefined" ? `${window.location.origin}/interview` : undefined;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
+          },
+        },
+      });
+      if (error) {
+        if (error.message.includes("provider is not enabled") || error.message.includes("validation_failed")) {
+          setError("Google Sign-In is not yet enabled in your Supabase dashboard. Please enable Google under Authentication > Providers in the Supabase console.");
+        } else {
+          setError(error.message);
+        }
+        setBusy(false);
+      }
+    } catch (err) {
+      setError(messageOf(err));
+      setBusy(false);
+    }
+  }
+
+  async function handleEmailSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setBusy(true);
     const form = new FormData(event.currentTarget);
     try {
-      if (resetToken) {
-        await api("/auth/reset-confirm", post({ token: resetToken, password: form.get("password") }));
-        setResetToken(""); setRecovering(false); setRegister(false); setSuccess("Password updated. Sign in with your new password.");
-      } else if (recovering) {
-        const result = await api<{ detail: string }>("/auth/reset-request", post({ email: form.get("email") }));
-        setSuccess(result.detail);
-      } else {
-        onAuthenticated(await api<User>(`/auth/${register ? "register" : "login"}`, post({ email: form.get("email"), password: form.get("password"), ...(register ? { name: form.get("name") } : {}) })));
-      }
-    } catch (error) { setError(messageOf(error)); } finally { setBusy(false); }
+      const user = await api<User>("/auth/login", post({
+        email: form.get("email"),
+        password: form.get("password"),
+      }));
+      onAuthenticated(user);
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      setBusy(false);
+    }
   }
-  function switchMode(create: boolean) { setRegister(create); setRecovering(false); setResetToken(""); setError(""); setSuccess(""); }
-  return <main className="auth-page">
-    <section className="auth-story">
-      <Brand />
-      <div className="auth-copy">
-        <p className="eyebrow"><span className="status-dot" /> BUILT AROUND YOUR EXPERIENCE</p>
-        <h1>Your work.<br />In your <em>words.</em></h1>
-        <p>Bring your experience into the conversation. Live assistance grounded in the projects, documents, and contributions that are yours.</p>
-        <div className="story-flow"><div><FileText size={19} /><span>Your knowledge</span></div><ArrowRight size={17} /><div><Radio size={19} /><span>Live conversation</span></div><ArrowRight size={17} /><div><Sparkles size={19} /><span>Grounded answers</span></div></div>
-      </div>
-      <div className="auth-foot"><LockKeyhole size={17} /><p>Visible consent. Private sources.<br />Raw audio is processed live and never stored.</p></div>
-      <span className="decorative-orbit" aria-hidden="true" />
-    </section>
-    <section className="auth-form-section"><div className="auth-form-wrap">
-      <p className="eyebrow">YOUR PRIVATE WORKSPACE</p>
-      <h2>{resetToken ? "Choose a new password." : recovering ? "Find your way back." : register ? "Make yourself at home." : "Good to have you back."}</h2>
-      <p className="muted">{resetToken ? "Set a strong password to secure your workspace." : recovering ? "We will email you a link to reset your password." : register ? "Create an account and start with what you know." : "Sign in to pick up where you left off."}</p>
-      {!resetToken && <div className="auth-tabs" role="group" aria-label="Account access"><button type="button" aria-pressed={!register} onClick={() => switchMode(false)}>Sign in</button><button type="button" aria-pressed={register} onClick={() => switchMode(true)}>Create account</button></div>}
-      {serviceError && <Alert>{serviceError}</Alert>}{success && <Alert tone="success">{success}</Alert>}
-      <form onSubmit={submit} className="form-stack">
-        {register && !recovering && !resetToken && <label>Your name<input name="name" autoComplete="name" required maxLength={120} placeholder="How should we call you?" /></label>}
-        {!resetToken && <label>Email address<input type="email" name="email" autoComplete="email" required maxLength={320} placeholder="you@example.com" /></label>}
-        {(!recovering || resetToken) && <label>{resetToken ? "New password" : "Password"}<input type="password" name="password" autoComplete={register || resetToken ? "new-password" : "current-password"} required minLength={register || resetToken ? 12 : undefined} maxLength={128} placeholder={register || resetToken ? "At least 12 characters" : "Enter your password"} /></label>}
-        {error && <Alert>{error}</Alert>}
-        <Button type="submit" busy={busy} className="wide">{resetToken ? "Save new password" : recovering ? "Send reset link" : register ? "Create my workspace" : "Sign in to workspace"}<ArrowRight size={17} /></Button>
-      </form>
-      {!register && !resetToken && <button className="text-link password-recovery" type="button" onClick={() => { setRecovering(!recovering); setError(""); setSuccess(""); }}>{recovering ? "Back to sign in" : "Forgot your password?"}</button>}
-      <p className="auth-note"><Check size={15} /> For interviews and meetings where all participants have agreed to live AI assistance.</p>
-    </div><p className="auth-bottom">Keep your voice. Bring the evidence.</p></section>
-  </main>;
+
+  return (
+    <main className="auth-page">
+      <section className="auth-story">
+        <Link href="/" className="auth-home" aria-label="InterviewWin home">
+          <Brand />
+        </Link>
+        <div className="auth-copy">
+          <p className="eyebrow">
+            <span className="status-dot" /> BUILT AROUND YOUR EXPERIENCE
+          </p>
+          <h1>
+            Your work.<br />
+            In your <em>words.</em>
+          </h1>
+          <p>
+            Bring your experience into the conversation. Live assistance grounded in the projects, documents, and contributions that are yours.
+          </p>
+          <div className="story-flow">
+            <div><FileText size={19} /><span>Your knowledge</span></div>
+            <ArrowRight size={17} />
+            <div><Radio size={19} /><span>Live conversation</span></div>
+            <ArrowRight size={17} />
+            <div><Sparkles size={19} /><span>Grounded answers</span></div>
+          </div>
+        </div>
+        <div className="auth-foot">
+          <LockKeyhole size={17} />
+          <p>
+            Visible consent. Private sources.<br />
+            Raw audio is processed live and never stored.
+          </p>
+        </div>
+        <span className="decorative-orbit" aria-hidden="true" />
+      </section>
+
+      <section className="auth-form-section">
+        <div className="auth-form-wrap">
+          <p className="eyebrow">YOUR NEXT INTERVIEW STARTS HERE</p>
+          <h2>Sign in with Google.</h2>
+          <p className="muted">
+            Access your interview workspace, knowledge sources, and live assistance in seconds.
+          </p>
+
+          {(serviceError || error) && <Alert>{error || serviceError}</Alert>}
+
+          <div style={{ marginTop: "32px", display: "flex", flexDirection: "column", gap: "16px" }}>
+            <button
+              type="button"
+              id="google-signin-btn"
+              onClick={handleGoogleSignIn}
+              disabled={busy}
+              className="google-login-btn"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "12px",
+                width: "100%",
+                padding: "13px 20px",
+                fontSize: "15px",
+                fontWeight: 600,
+                color: "#1e293b",
+                backgroundColor: "#ffffff",
+                border: "1.5px solid #cbd5e1",
+                borderRadius: "10px",
+                cursor: busy ? "not-allowed" : "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.06)",
+                transition: "all 0.18s ease-in-out",
+                opacity: busy ? 0.7 : 1,
+              }}
+            >
+              <GoogleIcon />
+              <span>{busy ? "Connecting to Google…" : "Continue with Google"}</span>
+            </button>
+          </div>
+
+          <div style={{ marginTop: "24px", textAlign: "center" }}>
+            <button
+              type="button"
+              className="text-link"
+              style={{ fontSize: "12px", color: "var(--muted)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+              onClick={() => setShowEmailFallback(!showEmailFallback)}
+            >
+              {showEmailFallback ? "Hide password sign in" : "Need email & password sign in?"}
+            </button>
+          </div>
+
+          {showEmailFallback && (
+            <form onSubmit={handleEmailSubmit} className="form-stack" style={{ marginTop: "20px" }}>
+              <label>
+                Email address
+                <input type="email" name="email" required maxLength={320} placeholder="you@example.com" />
+              </label>
+              <label>
+                Password
+                <input type="password" name="password" required maxLength={128} placeholder="Enter your password" />
+              </label>
+              <Button type="submit" busy={busy} className="wide">
+                Sign in with Password <ArrowRight size={17} />
+              </Button>
+            </form>
+          )}
+
+          <p className="auth-note" style={{ marginTop: "30px" }}>
+            <Check size={15} /> Authenticated securely through Supabase. For interviews where all participants have agreed to live AI assistance.
+          </p>
+        </div>
+        <p className="auth-bottom">Keep your voice. Bring the evidence.</p>
+      </section>
+    </main>
+  );
 }

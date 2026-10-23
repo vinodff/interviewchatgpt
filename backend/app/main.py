@@ -23,6 +23,7 @@ from app.db import SessionLocal, engine, initialize_database
 from app.github_identity import router as github_router
 from app.models import AuthSession, LiveSession, User
 from app.security import aware, current_user, local_testing_request, token_hash
+from app.services import cashfree
 from app.usage import charge_connection, minute_limit, used_seconds
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -42,7 +43,7 @@ async def lifespan(_app):
     await engine.dispose()
 
 
-app = FastAPI(title="InterviewPilot Live API", version="0.1.0", lifespan=lifespan,
+app = FastAPI(title="InterviewWin Live API", version="0.1.0", lifespan=lifespan,
               docs_url="/api/docs" if settings.environment != "production" else None)
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow_credentials=True,
                    allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["Content-Type", "X-InterviewPilot"])
@@ -129,7 +130,7 @@ async def health():
     return JSONResponse({"status": status, "database": "postgresql" if engine.dialect.name == "postgresql" else "sqlite-development",
                          "redis": "redis" if coordination.redis else "memory-development",
                          "ai_configured": bool(settings.gemini_api_key.get_secret_value()),
-                         "billing_configured": bool(settings.stripe_secret_key.get_secret_value() and settings.stripe_price_id)}, status_code=200 if status == "ok" else 503)
+                         "billing_configured": bool(cashfree.is_configured() or (settings.stripe_secret_key.get_secret_value() and settings.stripe_webhook_secret.get_secret_value() and (settings.stripe_price_id or settings.stripe_starter_price_id))) and not settings.local_test_mode}, status_code=200 if status == "ok" else 503)
 
 
 @app.websocket("/api/live/{session_id}/ws")

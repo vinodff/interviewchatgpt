@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">InterviewPilot Live</string>
+    <string name="app_name">InterviewWin Live</string>
     <string name="connection_title">Connect your workspace</string>
     <string name="connection_help">Use your hosted HTTPS address. For USB testing, run the Android connection script on your PC and use http://localhost:3001.</string>
     <string name="connection_privacy">Your server processes audio with Gemini. Raw audio is never saved. Use only with everyone’s permission. Microphone access stops when you leave the app.</string>

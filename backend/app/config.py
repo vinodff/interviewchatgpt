@@ -3,7 +3,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,8 +37,13 @@ class Settings(BaseSettings):
     public_url: str = "http://localhost:3000"
     cookie_secure: bool = False
     session_days: int = 7
-    free_minutes: int = 30
-    pro_minutes: int = 600
+    free_minutes: int = Field(default=2, ge=0)
+    starter_minutes: int = Field(default=20, gt=0)
+    pro_minutes: int = Field(default=45, gt=0)
+    value_minutes: int = Field(default=120, gt=0)
+    starter_price_minor: int = Field(default=10000, gt=0)
+    pro_price_minor: int = Field(default=20000, gt=0)
+    value_price_minor: int = Field(default=50000, gt=0)
     max_session_seconds: int = 7200
     github_token: SecretStr = SecretStr("")
     github_client_id: str = ""
@@ -46,6 +51,11 @@ class Settings(BaseSettings):
     stripe_secret_key: SecretStr = SecretStr("")
     stripe_webhook_secret: SecretStr = SecretStr("")
     stripe_price_id: str = ""
+    stripe_starter_price_id: str = ""
+    cashfree_app_id: str = ""
+    cashfree_secret: SecretStr = SecretStr("")
+    cashfree_env: str = "production"
+    cashfree_api_version: str = "2023-08-01"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""

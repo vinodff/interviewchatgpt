@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import json
@@ -567,3 +568,20 @@ async def test_retrieval_scopes_both_source_and_chunk_owner_and_project(database
 def test_invalid_embeddings_are_rejected(vector):
     with pytest.raises(knowledge.IngestionError):
         knowledge._validate_vectors([vector], 1)
+
+
+async def test_slow_query_embedding_reaches_lexical_fallback_within_live_budget(database, monkeypatch):
+    class SlowAI(FakeAI):
+        async def embed(self, texts, task_type):
+            await asyncio.Event().wait()
+
+    async with database() as db:
+        db.add(Source(id="slow-source", user_id="alice", name="notes.txt", status="ready"))
+        await db.flush()
+        db.add(Chunk(id="slow-chunk", source_id="slow-source", user_id="alice", text="Redis caching reduces database work", locator="L1"))
+        await db.commit()
+    monkeypatch.setattr(knowledge, "GeminiService", SlowAI)
+    async with asyncio.timeout(8):
+        evidence = await knowledge.retrieve("alice", "Redis caching")
+    assert evidence[0]["id"] == "slow-chunk"
+    assert evidence[0]["retrieval_mode"] == "lexical_fallback"
