@@ -60,6 +60,10 @@ export class LiveController {
   private removeVisibilityListener: (() => void) | null = null;
   private resetPendingBrowserSpeech: (() => void) | null = null;
   private manualSpeechCutoff = 0;
+  // "Listening but no transcript" diagnostics: warn once per session when
+  // non-English speech is heard, and report mic levels in backend mode.
+  private nonEnglishWarned = false;
+  private audioLevelCount = 0;
 
   constructor(private notify: (event: LiveMessage | LocalEvent) => void, private onSession: (session: Session) => void) {}
 
@@ -173,6 +177,8 @@ export class LiveController {
   async start(mode: AudioMode, title: string, retention: boolean, options: { enhancedMicrophone?: boolean; streamingMicrophone?: boolean } = {}): Promise<void> {
     if (this.started || this.stopped) return;
     this.started = true;
+    this.nonEnglishWarned = false;
+    this.audioLevelCount = 0;
     try {
       if (isBrowserWorkspace()) {
         if (mode !== "microphone") throw new Error("This workspace supports microphone speech only. Shared-tab transcription requires the full backend.");
@@ -319,6 +325,16 @@ export class LiveController {
   }
 
   private sendAudio(packet: ArrayBuffer): void {
+    // Report mic level even before the WebSocket opens, so "listening but
+    // no transcript" can be split into "mic is dead" vs "transcription
+    // service is not returning words". Throttled to every 3rd 100 ms packet.
+    if (!this.stopped && packet.byteLength === 3201 && ++this.audioLevelCount % 3 === 0) {
+      try {
+        const view = new DataView(packet); let sum = 0; let peak = 0;
+        for (let i = 0; i < 1600; i++) { const value = view.getInt16(1 + i * 2, true) / 32768; sum += value * value; peak = Math.max(peak, Math.abs(value)); }
+        this.notify({ type: "local", level: { rms: Math.sqrt(sum / 1600), peak, gain: 1 } });
+      } catch { /* A level report must never break audio delivery. */ }
+    }
     const ws = this.socket;
     if (!this.stopped && ws?.readyState === WebSocket.OPEN && ws.bufferedAmount + packet.byteLength <= MAX_OUTPUT_BYTES) {
       try { ws.send(packet); return; }
@@ -482,7 +498,21 @@ export class LiveController {
 
         const dispatchProcessedSpeech = (transcriptText: string) => {
           const cleaned = transcriptText.trim().replace(/\s+/g, " ");
-          if (!cleaned || this.stopped || !this.isEnglishSpeech(cleaned)) return;
+          if (!cleaned || this.stopped) return;
+          // Previously non-English speech was dropped silently here, so a
+          // user speaking Telugu (or any non-Latin script) saw "listening"
+          // forever with no transcript and no explanation. Show the words
+          // that were heard, warn once, and still send them for an answer.
+          if (!this.isEnglishSpeech(cleaned)) {
+            if (!this.nonEnglishWarned) {
+              this.nonEnglishWarned = true;
+              this.notify({ type: "local", error: "Heard speech in another language. It is shown below and still sent for an answer in English — if it is missed, try English or type the question below." });
+            }
+            this.notify({ type: "transcript", id: utteranceId, role: "unknown", text: cleaned, final: true });
+            lastDispatchedText = cleaned; lastDispatchedAt = Date.now();
+            void this.handleBrowserQuestion(cleaned, utteranceId);
+            return;
+          }
 
           // Self-echo / duplicate protection: only exact (or near-exact)
           // consecutive repeats within 4s are dropped, per invariant.
@@ -635,16 +665,17 @@ export class LiveController {
           // Live interim preview with a STABLE id so the UI replaces the
           // previous preview in place (same pattern as the backend's
           // transcript_id reuse). Predictable, no transcript-list flooding.
-          if (this.isEnglishSpeech(phrase)) {
-            this.interviewMemory.recordSpeech({ id: utteranceId, role: "unknown", text: phrase, final: false });
-            this.notify({
-              type: "transcript",
-              id: utteranceId,
-              role: "unknown",
-              text: phrase,
-              final: false
-            });
-          }
+          // Show interim speech in every language: hiding it made a
+          // working microphone look dead whenever the recogniser returned
+          // non-Latin text. The final dispatch above still decides answers.
+          this.interviewMemory.recordSpeech({ id: utteranceId, role: "unknown", text: phrase, final: false });
+          this.notify({
+            type: "transcript",
+            id: utteranceId,
+            role: "unknown",
+            text: phrase,
+            final: false
+          });
           // Every onresult restarts the silence clock: the utterance only
           // finalizes after the speaker actually pauses, so tail words are
           // never cut off.

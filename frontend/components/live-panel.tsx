@@ -21,9 +21,12 @@ type LivePanelProps = {
   sources: Source[]; health: Health | null; user: User; mobile: boolean; visible: boolean;
   toolbar: ReactNode; alerts: ReactNode; onUser: (user: User) => void;
   onAnswerHeight: (height: number) => void; onViewportHeight: (height: number) => void; onActive: (active: boolean) => void; onSession: (session: Session) => void;
+  // Lets the workspace stop this session from outside the Live tab (H-2):
+  // the panel stays mounted while hidden, so its own End button is unreachable.
+  onStopReady?: (stop: () => Promise<void>) => void;
 };
 
-export function LivePanel({ sources, health, user, mobile, visible, toolbar, alerts, onUser, onAnswerHeight, onViewportHeight, onActive, onSession }: LivePanelProps) {
+export function LivePanel({ sources, health, user, mobile, visible, toolbar, alerts, onUser, onAnswerHeight, onViewportHeight, onActive, onSession, onStopReady }: LivePanelProps) {
   const [state, setState] = useState<LiveState>(initialLiveState);
   const [mode, setMode] = useState<AudioMode>("microphone");
   const [microphoneEngine, setMicrophoneEngine] = useState("streaming");
@@ -68,6 +71,10 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
     return () => window.removeEventListener("interviewpilot:app-background", pause);
   }, []);
   useEffect(() => { onActive(active); }, [active, onActive]);
+  // Expose stop through a ref-reading closure: controller.current is only
+  // assigned in start(), after this effect runs, so the closure must read
+  // the ref at call time, not capture its (then null) value.
+  useEffect(() => { onStopReady?.(async () => { await controller.current?.stop(); }); }, [onStopReady]);
   useEffect(() => {
     let value = ANSWER_HEIGHT_DEFAULT;
     try { value = readAnswerHeight(window.localStorage.getItem(ANSWER_HEIGHT_KEY)); } catch { /* The split also works when device storage is unavailable. */ }
@@ -157,7 +164,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
   const stopButton = <Button variant="danger" className={mobile ? "mobile-stop" : "wide"} onClick={() => { void controller.current?.stop(); }}><Square size={15} fill="currentColor" /> End interview</Button>;
 
   return <div ref={layout} className="live-workspace" style={style}>
-    <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{state.announcement}</div>
+    {visible && <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{state.announcement}</div>}
     <div className="live-desktop-heading"><SectionHeader eyebrow="YOUR VOICE. YOUR EVIDENCE." title="Live interview" description="Stay in the conversation. Relevant context arrives as questions are spoken." action={<div className={`live-state-label ${state.phase === "listening" ? "is-live" : ""}`} role="status"><span className="status-dot" />{status}</div>} /></div>
 
     <section ref={answerPane} id="live-answer-pane" className="live-answer-region answer-panel" aria-label="Suggested answer" tabIndex={0}>
@@ -210,7 +217,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
 
       <div className="live-lower-scroll" tabIndex={mobile ? 0 : undefined} aria-label={mobile ? "Scrollable live controls" : undefined}>
         {Object.entries(state.transcriptionWarnings).map(([channel, message]) => <Alert key={channel} tone="info">{message}</Alert>)}
-        <div className="live-alerts">{alerts}{state.error && <Alert>{state.error}</Alert>}{health?.ai_configured === false && <Alert tone="info">Live answers are unavailable right now. Try again later or contact support.</Alert>}{!minutesAvailable && <Alert tone="info">You’ve used your live minutes for this month. View Plans &amp; billing for your options.</Alert>}</div>
+        <div className="live-alerts">{alerts}{state.error && <Alert>{state.error}</Alert>}{health?.ai_configured === false && <Alert tone="info">Live answers are unavailable right now. Try again later or contact support.</Alert>}{!minutesAvailable && <Alert tone="info">You’ve used your live minutes for this month. View Plans &amp; billing for your options.</Alert>}{active && elapsed >= 20 && state.transcripts.length === 0 && <Alert tone="info">No speech recognised yet. If the microphone meter above stays near silent, move closer, unmute, or pick another microphone. If the meter moves but no words appear, try Enhanced or Standard speech recognition, or type the question below.</Alert>}</div>
         <aside className="live-control">
           <details className="panel capture-panel live-collapsible" open={!mobile || captureOpen} onToggle={event => { if (mobile) setCaptureOpen(event.currentTarget.open); }}>
             <summary><Headphones size={18} /><span>{active ? "Interview audio" : "Interview setup"}</span><ChevronDown size={17} /></summary>
@@ -233,7 +240,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
               <div className="connection-row"><MonitorUp size={17} /><span>{mode === "tab" ? "Tab audio · interviewer" : "Microphone · mixed speakers"}</span><span className="channel-label">CH 0</span></div>
               {mode === "tab" && <div className="connection-row"><Mic size={17} /><span>Microphone · you</span><span className="channel-label">CH 1</span></div>}
               <p className="capture-status" role="status">{state.detail || "The assistant is listening for interview questions."}</p>
-              {browserWorkspace && microphoneEngine !== "standard" && <div className="microphone-meter"><label htmlFor="microphone-input-level">Microphone input</label><meter id="microphone-input-level" min={0} max={1} value={microphoneLevel ? Math.max(0, Math.min(1, (20 * Math.log10(Math.max(0.000001, microphoneLevel.rms)) + 80) / 80)) : 0} /><p className="muted small">{!microphoneLevel ? "Waiting for microphone input…" : microphoneLevel.rms < 0.00012 ? "Almost silent — move the microphone closer or raise the interviewer's speaker volume." : microphoneLevel.peak > 0.95 ? "Very loud — move slightly farther from the microphone." : microphoneLevel.rms < 0.002 ? "Quiet input — amplification is enabled." : "Audio is reaching the microphone."}{microphoneLevel && ` Input gain: ${microphoneLevel.gain.toFixed(1)}×.`}</p></div>}
+              {(microphoneLevel || (browserWorkspace && microphoneEngine !== "standard")) && <div className="microphone-meter"><label htmlFor="microphone-input-level">Microphone input</label><meter id="microphone-input-level" min={0} max={1} value={microphoneLevel ? Math.max(0, Math.min(1, (20 * Math.log10(Math.max(0.000001, microphoneLevel.rms)) + 80) / 80)) : 0} /><p className="muted small">{!microphoneLevel ? "Waiting for microphone input…" : microphoneLevel.rms < 0.00012 ? "Almost silent — move the microphone closer or raise the interviewer's speaker volume." : microphoneLevel.peak > 0.95 ? "Very loud — move slightly farther from the microphone." : microphoneLevel.rms < 0.002 ? "Quiet input — amplification is enabled." : "Audio is reaching the microphone."}{microphoneLevel && ` Input gain: ${microphoneLevel.gain.toFixed(1)}×.`}</p></div>}
               {!mobile && stopButton}<p className="audio-privacy">{retention ? "Session text will be retained." : "Session text will not be retained."} Audio is never stored.</p>
             </>}
           </details>
@@ -334,7 +341,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
           <details className="panel transcript-panel live-collapsible" open={!mobile || transcriptOpen} onToggle={event => { if (mobile) setTranscriptOpen(event.currentTarget.open); }}>
             <summary><Mic size={18} /><span>Conversation transcript</span><ChevronDown size={17} /></summary>
             <div className="panel-heading"><div><h2>Conversation</h2><span className="muted small">{mode === "tab" ? "Separate audio channels" : "Contextual question detection · speaker estimates"}</span></div><span className="transcript-live"><span className="status-dot" />{active ? "LIVE TRANSCRIPT" : "TRANSCRIPT"}</span></div>
-            <div ref={transcripts} className="transcript-log" role="log" aria-label="Live conversation transcript" aria-live="polite" aria-relevant="additions">{state.transcripts.length ? state.transcripts.map(turn => <div className={`transcript-turn transcript-${turn.role} ${turn.final ? "" : "partial"}`} key={turn.id}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}><span>{turn.role === "interviewer" ? "Interviewer" : turn.role === "user" ? "You" : "Speaker uncertain"}</span>{turn.timestamp && <span style={{ fontSize: "11px", opacity: 0.65, fontVariantNumeric: "tabular-nums", letterSpacing: "0.02em" }}>{turn.timestamp}</span>}</div><p>{turn.text}{!turn.final && <span className="typing-caret" aria-hidden="true" />}</p></div>) : <div className="transcript-empty"><Mic size={21} /><p>{active ? "Recognized speech will appear here." : "Your conversation transcript will appear once audio starts."}</p></div>}</div>
+            <div ref={transcripts} className="transcript-log" role="log" aria-label="Live conversation transcript" aria-live={visible ? "polite" : "off"} aria-relevant="additions">{state.transcripts.length ? state.transcripts.map(turn => <div className={`transcript-turn transcript-${turn.role} ${turn.final ? "" : "partial"}`} key={turn.id}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}><span>{turn.role === "interviewer" ? "Interviewer" : turn.role === "user" ? "You" : "Speaker uncertain"}</span>{turn.timestamp && <span style={{ fontSize: "11px", opacity: 0.65, fontVariantNumeric: "tabular-nums", letterSpacing: "0.02em" }}>{turn.timestamp}</span>}</div><p>{turn.text}{!turn.final && <span className="typing-caret" aria-hidden="true" />}</p></div>) : <div className="transcript-empty"><Mic size={21} /><p>{active ? "Recognized speech will appear here." : "Your conversation transcript will appear once audio starts."}</p></div>}</div>
             {Object.keys(state.metrics).length > 0 && <div className="live-metrics"><span>{state.metrics.questions || 0} questions</span><span>{state.metrics.reconnects || 0} reconnects</span><span>{(state.metrics.audio_dropped || 0) + (state.metrics.client_audio_dropped || 0)} audio blocks dropped</span>{state.metrics.first_token_ms !== undefined && <span>First token: {state.metrics.first_token_ms}ms</span>}</div>}
           </details>
         </div>
