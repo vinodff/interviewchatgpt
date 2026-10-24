@@ -19,6 +19,7 @@ import {
 import { ApiError, messageOf, post } from "@/lib/api";
 import { formatPlanPrice, parsePlans, type PlanCatalog, type PlanId } from "@/lib/plans";
 import { useOwnedApi } from "@/lib/use-owned-api";
+import { CashfreeService } from "@/lib/cashfree-service";
 import type { Health, User } from "@/lib/types";
 import { Alert, Button, SectionHeader } from "./ui";
 
@@ -52,7 +53,7 @@ const PLAN_DETAILS: Record<
   starter: {
     tagline: "Great for your upcoming 1–2 interview rounds.",
     badge: "QUICK PREP",
-    badgeColor: "#3b82f6",
+    badgeColor: "#2563eb",
     features: [
       { text: "20 live interview minutes", highlight: true },
       { text: "Unlimited Resume Uploads & Project Grounding", highlight: true, tag: "Resume" },
@@ -67,7 +68,7 @@ const PLAN_DETAILS: Record<
   pro: {
     tagline: "Recommended for active job seekers & complete interview loops.",
     badge: "★ MOST POPULAR",
-    badgeColor: "#14b8a6",
+    badgeColor: "#15675b",
     features: [
       { text: "45 live interview minutes (covers 3–4 interview rounds)", highlight: true },
       { text: "Unlimited Knowledge Base & Company Research files", highlight: true, tag: "Unlimited" },
@@ -83,7 +84,7 @@ const PLAN_DETAILS: Record<
   value: {
     tagline: "Full coverage for senior loops, executive rounds & intensive preparation.",
     badge: "💎 ULTIMATE VALUE",
-    badgeColor: "#8b5cf6",
+    badgeColor: "#7c3aed",
     features: [
       { text: "120 live interview minutes (2 full hours of live AI assistance!)", highlight: true },
       { text: "Permanent validity — purchased minutes never expire", highlight: true, tag: "Never Expire" },
@@ -143,7 +144,7 @@ export function Billing({
     return () => controller.abort();
   }, []);
 
-  async function pollCashfreeOrder(orderId: string) {
+  async function pollCashfreeOrder(orderId: string, expectedPlan?: string) {
     setBusy("verifying");
     setError("");
     let isPaid = false;
@@ -155,17 +156,25 @@ export function Billing({
 
     async function checkOnce(): Promise<boolean> {
       try {
-        const res = await api<{
-          status: string;
-          order_id: string;
-          plan: string;
-          minutes_granted: number;
-        }>(`/billing/cashfree/verify/${orderId}`);
+        const res = await CashfreeService.getOrderStatus(orderId);
 
-        if (res.status === "PAID") {
+        if (res.order_status === "PAID") {
           isPaid = true;
+          const planToUse =
+            expectedPlan ||
+            (res.order_amount && res.order_amount >= 500
+              ? "value"
+              : res.order_amount && res.order_amount >= 200
+              ? "pro"
+              : "starter");
+          const minutesGranted =
+            planToUse === "value" ? 120 : planToUse === "pro" ? 45 : 20;
+
+          // Call RPC add_credits to credit user balance atomically in PostgreSQL
+          await CashfreeService.finalizeCredits(minutesGranted, planToUse);
+
           setSuccess(
-            `Payment confirmed! Your ${res.plan.toUpperCase()} plan is now active with ${res.minutes_granted} minutes.`
+            `Payment confirmed! Your ${planToUse.toUpperCase()} plan is now active with ${minutesGranted} minutes.`
           );
           setBusy(null);
           window.removeEventListener("focus", onFocus);
@@ -181,12 +190,12 @@ export function Billing({
     }
 
     try {
-      // Poll every 3s for up to 3 minutes (60 iterations)
-      for (let i = 0; i < 60; i++) {
+      // Poll every 2.5s for up to 3 minutes (72 iterations)
+      for (let i = 0; i < 72; i++) {
         if (isPaid) break;
         const confirmed = await checkOnce();
         if (confirmed) return;
-        await new Promise((r) => setTimeout(r, 3000));
+        await new Promise((r) => setTimeout(r, 2500));
       }
     } finally {
       window.removeEventListener("focus", onFocus);
@@ -219,46 +228,21 @@ export function Billing({
     if (gateway === "cashfree") {
       try {
         const phoneToUse = customerPhone || phone.trim() || "9876543210";
-        const res = await api<{
-          order_id: string;
-          payment_session_id: string;
-          amount: number;
-          plan: string;
-          environment: string;
-        }>("/billing/cashfree/create-order", post({ plan, phone: phoneToUse }));
+        const planAmounts: Record<string, number> = { starter: 100, pro: 200, value: 500 };
+        const amount = planAmounts[plan] || 100;
 
-        let openedModal = false;
+        const order = await CashfreeService.createOrder({
+          amount,
+          email: user.email,
+          phone: phoneToUse,
+          plan,
+          customerId: user.id,
+        });
 
-        // Try standard Cashfree JS SDK checkout modal if available
-        if (typeof window !== "undefined" && window.Cashfree) {
-          try {
-            const cf = window.Cashfree({
-              mode: res.environment === "production" ? "production" : "sandbox",
-            });
-            const checkoutRes = await cf.checkout({
-              paymentSessionId: res.payment_session_id,
-              redirectTarget: "_modal",
-            });
-            if (!checkoutRes.error) {
-              openedModal = true;
-            }
-          } catch {
-            openedModal = false;
-          }
-        }
-
-        // If modal was not available or blocked, use the whitelisted checkout bridge
-        if (!openedModal) {
-          const bridgeUrl = `https://vinodff.github.io/incoin-auto-v1/cashfree-checkout.html?session_id=${res.payment_session_id}`;
-          const popup = window.open(bridgeUrl, "_blank");
-          if (!popup || popup.closed || typeof popup.closed === "undefined") {
-            window.location.href = bridgeUrl;
-            return;
-          }
-        }
+        await CashfreeService.openCheckout(order.payment_session_id);
 
         // Active verification polling while user completes payment
-        await pollCashfreeOrder(res.order_id);
+        await pollCashfreeOrder(order.order_id, plan);
       } catch (err) {
         setError(messageOf(err));
         setBusy(null);
@@ -454,7 +438,7 @@ export function Billing({
               <div className="plan-header">
                 <div className="plan-name-row">
                   <h3>{plan.name}</h3>
-                  {isPopular && <Crown size={18} className="text-amber-400" />}
+                  {isPopular && <Crown size={18} style={{ color: "#d97706" }} />}
                 </div>
                 <p className="plan-tagline">{details.tagline}</p>
               </div>

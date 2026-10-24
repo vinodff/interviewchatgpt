@@ -79,21 +79,29 @@ export async function GET(
           }
 
           if (targetUserId) {
-            const { data: userRow } = await db
-              .from("users")
-              .select("id, credit_seconds, plan")
-              .eq("id", targetUserId)
-              .maybeSingle();
-
-            if (userRow) {
-              const currentSeconds = userRow.credit_seconds || 0;
-              await db
+            try {
+              await db.rpc("add_credits_for_user", {
+                p_user_id: targetUserId,
+                p_amount: minutes,
+                p_plan: plan,
+              });
+            } catch {
+              const { data: userRow } = await db
                 .from("users")
-                .update({
-                  plan,
-                  credit_seconds: currentSeconds + minutes * 60,
-                })
-                .eq("id", targetUserId);
+                .select("id, credit_seconds, plan")
+                .eq("id", targetUserId)
+                .maybeSingle();
+
+              if (userRow) {
+                const currentSeconds = userRow.credit_seconds || 0;
+                await db
+                  .from("users")
+                  .update({
+                    plan,
+                    credit_seconds: currentSeconds + minutes * 60,
+                  })
+                  .eq("id", targetUserId);
+              }
             }
           }
         } catch {

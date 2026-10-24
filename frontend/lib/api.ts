@@ -42,7 +42,12 @@ function defaultError(status: number): string {
 /** Workspace storage is explicit; a failed backend call never changes modes. */
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   options.signal?.throwIfAborted();
-  if (isBrowserWorkspace() && !["/health", "/provider/check", "/live/answer", "/live/transcribe", "/live/speech-ticket"].includes(path)) {
+  if (
+    isBrowserWorkspace() &&
+    !path.startsWith("/billing") &&
+    !path.startsWith("/supabase") &&
+    !["/health", "/provider/check", "/live/answer", "/live/transcribe", "/live/speech-ticket"].includes(path)
+  ) {
     const { handleBrowserStorageRequest } = await import("./browser-storage");
     options.signal?.throwIfAborted();
     const result = await handleBrowserStorageRequest<T>(path, options);
