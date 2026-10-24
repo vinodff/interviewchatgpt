@@ -2,8 +2,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ArrowRight, Check, FileText, LockKeyhole, Radio, Sparkles } from "lucide-react";
-import { api, messageOf, post } from "@/lib/api";
+import { messageOf } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
+import { fetchSupabaseMe } from "@/lib/supabase-identity";
 import type { User } from "@/lib/types";
 import { Alert, Button } from "./ui";
 import { Brand } from "./brand";
@@ -46,12 +47,10 @@ export function Auth({ onAuthenticated, serviceError }: { onAuthenticated: (user
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user && !cancelled) {
           setBusy(true);
-          const user = await api<User>("/auth/supabase-session", post({
-            user_id: session.user.id,
-            email: session.user.email || "",
-            name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || (session.user.email ? session.user.email.split("@")[0] : "User"),
-            access_token: session.access_token,
-          }));
+          // Identity now comes from the Vercel /api/supabase/me route,
+          // which validates the Supabase JWT itself — no caller-supplied
+          // user id or email is trusted.
+          const user = await fetchSupabaseMe();
           if (!cancelled) onAuthenticated(user);
         }
       } catch (err) {
@@ -67,12 +66,7 @@ export function Auth({ onAuthenticated, serviceError }: { onAuthenticated: (user
       if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && !cancelled) {
         setBusy(true);
         try {
-          const user = await api<User>("/auth/supabase-session", post({
-            user_id: session.user.id,
-            email: session.user.email || "",
-            name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || (session.user.email ? session.user.email.split("@")[0] : "User"),
-            access_token: session.access_token,
-          }));
+          const user = await fetchSupabaseMe();
           if (!cancelled) onAuthenticated(user);
         } catch (err) {
           if (!cancelled) setError(messageOf(err));
@@ -123,10 +117,14 @@ export function Auth({ onAuthenticated, serviceError }: { onAuthenticated: (user
     setBusy(true);
     const form = new FormData(event.currentTarget);
     try {
-      const user = await api<User>("/auth/login", post({
-        email: form.get("email"),
-        password: form.get("password"),
-      }));
+      // Email fallback also goes through Supabase Auth directly (no
+      // FastAPI backend), then the same verified /api/supabase/me route.
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: String(form.get("email") || ""),
+        password: String(form.get("password") || ""),
+      });
+      if (signInError) throw signInError;
+      const user = await fetchSupabaseMe();
       onAuthenticated(user);
     } catch (err) {
       setError(messageOf(err));

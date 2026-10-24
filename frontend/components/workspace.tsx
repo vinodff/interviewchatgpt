@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { ArrowRight, AudioLines, BookOpen, Check, ChevronRight, Clock3, CreditCard, FileText, Folder, LayoutDashboard, LogOut, Menu, Radio, RefreshCw, ShieldCheck, UserRound, X } from "lucide-react";
-import { api, ApiError, formatDate, messageOf, post } from "@/lib/api";
+import { api, ApiError, formatDate, messageOf } from "@/lib/api";
+import { fetchSupabaseMe } from "@/lib/supabase-identity";
 import type { Health, Project, Session, Source, User } from "@/lib/types";
 import { supabase } from "@/lib/supabase";
 import { Auth, Brand } from "./auth";
@@ -65,7 +66,10 @@ export function Workspace({ initialPage = "overview", initialRegister = false, i
       api<Project[]>("/projects", { signal: request.signal }),
       api<Source[]>("/sources", { signal: request.signal }),
       api<Session[]>("/sessions", { signal: request.signal }),
-      api<User>("/auth/me", { signal: request.signal }),
+      // Identity is Supabase, not the browser Candidate: verified JWT to
+      // the Vercel /api/supabase/me route. Projects/sources/sessions
+      // below still come from browser storage in this login-first build.
+      fetchSupabaseMe(),
       api<Health>("/health", { signal: request.signal })
     ]);
     if (dataRequest.current === request) refreshInFlight.current = false;
@@ -98,19 +102,26 @@ export function Workspace({ initialPage = "overview", initialRegister = false, i
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => { controller.abort(); }, 15000);
-    api<User>("/auth/me", { signal: controller.signal }).then(value => {
-      identity.current = value.id;
-      setUser(value);
-      void refresh();
-    }).catch(error => {
-      if (!controller.signal.aborted) setError(error instanceof ApiError && error.status === 401 ? "" : messageOf(error));
-    }).finally(() => {
-      clearTimeout(timer);
-      setInitial(false);
+    // Login first: no Supabase session means the Auth screen (Google
+    // sign-in), never an auto-entered Candidate workspace. The old
+    // /auth/me call returned the invented browser user here.
+    let cancelled = false;
+    void supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (cancelled) return;
+      if (!session?.user) { setInitial(false); return; }
+      try {
+        const value = await fetchSupabaseMe();
+        if (cancelled) return;
+        identity.current = value.id;
+        setUser(value);
+        void refresh();
+      } catch (error) {
+        if (!cancelled) setError(error instanceof ApiError && error.status === 401 ? "" : messageOf(error));
+      } finally {
+        if (!cancelled) setInitial(false);
+      }
     });
-    return () => { clearTimeout(timer); controller.abort(); dataRequest.current?.abort(); };
+    return () => { cancelled = true; dataRequest.current?.abort(); };
   }, [refresh]);
   useEffect(() => {
     if (!menu || !mobile) return;
@@ -175,7 +186,6 @@ export function Workspace({ initialPage = "overview", initialRegister = false, i
     dataRequest.current?.abort();
     try {
       await supabase.auth.signOut().catch(() => {});
-      await api("/auth/logout", post());
       updateUser(null);
       setPage("overview");
       window.history.replaceState(null, "", interviewUrl("overview"));
