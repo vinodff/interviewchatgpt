@@ -2,13 +2,15 @@ import type { NextConfig } from "next";
 
 const backend = (process.env.BACKEND_INTERNAL_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 const config: NextConfig = {
-  // Production must never silently fall back to the local-preview build:
-  // a Vercel build without BACKEND_INTERNAL_URL used to become "browser"
-  // mode, showing Candidate / Local Preview with unlimited minutes instead
-  // of login and the user's own minutes. Browser mode is now explicit
-  // opt-in only (set NEXT_PUBLIC_WORKSPACE_MODE=browser); every other
-  // build is the account mode, with login and real minute limits.
-  env: { NEXT_PUBLIC_WORKSPACE_MODE: process.env.NEXT_PUBLIC_WORKSPACE_MODE || "backend" },
+  // Account mode is forced for this deployment, ignoring any dashboard
+  // NEXT_PUBLIC_WORKSPACE_MODE=browser setting: that setting was still
+  // winning over the previous "default to backend" change, so production
+  // kept serving Candidate / Local Preview with unlimited minutes, and
+  // paid plans fell back to preview plans (checkout unavailable), which
+  // is why plan buttons linked to /contact instead of checkout. The
+  // local-preview browser mode is therefore disabled on this deployment;
+  // re-enable it only by changing this line, not by an env var.
+  env: { NEXT_PUBLIC_WORKSPACE_MODE: "backend" },
   output: "standalone",
   experimental: { cpus: 1, workerThreads: true },
   async rewrites() {
