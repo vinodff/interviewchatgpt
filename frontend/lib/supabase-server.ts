@@ -36,8 +36,14 @@ export class MissingEnvError extends Error {
 }
 
 export function serviceClient(): SupabaseClient {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!key) throw new MissingEnvError("SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(supabaseUrl(), key, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
+export function getServiceClientSafe(): SupabaseClient | null {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!key) return null;
   return createClient(supabaseUrl(), key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 

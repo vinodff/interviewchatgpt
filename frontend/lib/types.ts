@@ -3,6 +3,8 @@ export type User = {
   profile: Record<string, unknown>; preferences?: Preferences; minutes_used: number; minute_limit: number | null; testing_mode?: boolean;
   github_verified?: boolean; github_verified_username?: string;
   billing_account?: boolean;
+  monthly_minute_limit?: number;
+  credit_minutes_remaining?: number;
 };
 export type Preferences = { include_simple_example?: boolean; role?: string; company?: string; language?: string; answer_style?: string; job_description?: string; answer_tone?: "professional" | "friendly" | "casual"; grounding?: "balanced" | "strict"; english_level?: "simple" | "everyday" | "advanced"; reading_mode?: "auto" | "speech" | "paced" | "off"; reading_wpm?: number; response_delivery?: "natural" | "talking_points" | "structured"; personalization?: "grounded" | "technical"; answer_text_size?: number; answer_font?: "system" | "serif" | "readable"; answer_theme?: "default" | "easy" | "contrast" };
 export type Project = { id: string; name: string; description: string; analysis: Record<string, unknown>; source_count: number; created_at: string };
