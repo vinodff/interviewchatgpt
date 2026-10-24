@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AnswerStoppedError, generateAnswerWithGemini } from "@/lib/server-answer";
 import { proxyBackend } from "@/lib/server-proxy";
+import { isBrowserWorkspace } from "@/lib/workspace-mode";
 import { sanitizeInterviewContext } from "@/lib/interview-memory";
 import { transcribeMicrophone, validMicrophoneWav } from "@/lib/server-transcription";
 import { createSpeechTicket } from "@/lib/server-streaming-speech";
@@ -22,7 +23,7 @@ function limited(request: NextRequest, transcription = false, ticket = false): b
 async function handle(request: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path: segments } = await params;
   const path = segments.join("/");
-  if (process.env.NEXT_PUBLIC_WORKSPACE_MODE !== "browser") return proxyBackend(request, segments);
+  if (!isBrowserWorkspace()) return proxyBackend(request, segments);
   if (request.method === "GET" && path === "health") {
     return json({ status: "ok", database: "this browser", redis: "not used", ai_configured: Boolean(process.env.GEMINI_API_KEY), billing_configured: false });
   }
