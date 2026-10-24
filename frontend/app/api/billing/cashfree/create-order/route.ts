@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
       },
       order_note: `InterviewPilot ${planInfo.name} Plan (${planInfo.minutes} live minutes)`,
       order_meta: {
-        return_url: returnUrl,
+        notify_url: "",
       },
     };
 

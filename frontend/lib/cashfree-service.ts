@@ -123,29 +123,13 @@ export class CashfreeService {
   }
 
   /**
-   * Launches the Cashfree Checkout UI.
-   * Tries Cashfree JS SDK v3 modal first, and falls back to the whitelisted GitHub Pages bridge.
+   * Launches the Cashfree Checkout UI on the whitelisted domain.
+   * Uses the pre-whitelisted GitHub Pages bridge (vinodff.github.io)
+   * so transactions succeed without Cashfree merchant domain whitelist errors.
    */
   static async openCheckout(paymentSessionId: string): Promise<boolean> {
     if (!paymentSessionId) return false;
 
-    // 1. Try Cashfree SDK v3 Modal
-    if (typeof window !== "undefined" && (window as any).Cashfree) {
-      try {
-        const cf = (window as any).Cashfree({ mode: "production" });
-        const res = await cf.checkout({
-          paymentSessionId,
-          redirectTarget: "_modal",
-        });
-        if (!res?.error) {
-          return true;
-        }
-      } catch {
-        // Modal failed or popup blocker caught it, proceed to hosted bridge
-      }
-    }
-
-    // 2. Fall back to hosted GitHub Pages checkout bridge
     const bridgeUrl = `${HOSTED_CHECKOUT_URL}?session_id=${encodeURIComponent(paymentSessionId)}`;
     const popup = window.open(bridgeUrl, "_blank");
     if (!popup || popup.closed || typeof popup.closed === "undefined") {
