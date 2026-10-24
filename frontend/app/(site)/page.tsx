@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight, AudioLines, ChevronRight, Code2, FileText, Folder, ShieldCheck, SlidersHorizontal, Smartphone } from "lucide-react";
 import { HomeDemo } from "@/components/home-demo";
+import { HomeHero3D } from "@/components/home-hero-3d";
 import { HomeShowcase, MobileShowcase } from "@/components/home-showcase";
 import { ShowcaseMotion } from "@/components/showcase-motion";
 import { ScrollMotion } from "@/components/scroll-motion";
@@ -24,7 +25,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
     <section className="home-hero landing-container" data-scroll-scene>
       <div className="home-hero-heading" data-reveal><p className="home-kicker"><span className="home-dot" /> YOUR NEXT INTERVIEW. A CLEARER HEAD.</p><h1>You know your story.<br /><em>Find the words, live.</em></h1><p className="home-intro">Your experience, turned into clear talking points.<br className="home-desktop-break" /> Live interview assistance that keeps your knowledge within reach.</p><div className="landing-actions"><Link href="/interview?view=live" className="button button-primary">Start live interview <ArrowRight size={18} /></Link><a href="#product-preview" className="home-demo-link">Explore the live preview <ChevronRight size={17} /></a></div><p className="home-hero-note">30 free minutes per month <span>·</span> No card needed <span>·</span> Use with everyone’s permission</p></div>
       <MobileShowcase />
-      <div className="home-product-scroll" data-scroll-layer="hero"><div className="home-product-stage" data-reveal data-reveal-delay="100"><div className="home-stage-label"><span>YOUR EXPERIENCE → YOUR ANSWERS</span><span>Try a question below <ArrowRight size={14} /></span></div><HomeDemo /></div></div>
+      <div className="home-product-scroll" data-scroll-layer="hero"><HomeHero3D><div className="home-product-stage" data-reveal data-reveal-delay="100"><div className="home-stage-label"><span>YOUR EXPERIENCE → YOUR ANSWERS</span><span>Try a question below <ArrowRight size={14} /></span></div><HomeDemo /></div></HomeHero3D></div>
       <div className="home-capabilities"><span><AudioLines size={18} /> Live suggestions</span><span><Folder size={18} /> Resume & project context</span><span><Code2 size={18} /> Technical & behavioral</span><span><Smartphone size={18} /> Desktop to mobile</span></div>
     </section>
     <HomeShowcase />

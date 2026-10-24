@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Check, ChevronDown, SlidersHorizontal } from "lucide-react";
+import { AlignCenter, AlignJustify, AlignLeft, AudioLines, Check, ChevronDown, Clock3, ListChecks, ListOrdered, MessageSquare, Mic, Power, SlidersHorizontal, Sparkles, type LucideIcon } from "lucide-react";
 import { messageOf } from "@/lib/api";
 import { useOwnedApi } from "@/lib/use-owned-api";
 import { ROLES, searchCompanies } from "@/lib/companies";
@@ -86,11 +86,23 @@ export function RoleField({ preferences, controlled = false, onChange }: { prefe
     onPick={role => onChange?.({ ...preferences, role })} />;
 }
 
+function ChipGroup({ name, label, value, options, onSelect }: { name: string; label: string; value: string; options: { value: string; label: string; icon: LucideIcon }[]; onSelect: (value: string) => void }) {
+  return <fieldset className="preference-chips"><legend>{label}</legend><input type="hidden" name={name} value={value} /><div>{options.map(option => {
+    const Icon = option.icon; const selected = value === option.value;
+    return <button key={option.value} type="button" aria-pressed={selected} className={`preference-chip ${selected ? "selected" : ""}`} onClick={() => onSelect(option.value)}><Icon size={15} aria-hidden="true" />{option.label}{selected && <Check size={13} aria-hidden="true" />}</button>;
+  })}</div></fieldset>;
+}
+
 export function AnswerPreferenceFields({ preferences, controlled = false, onChange }: { preferences: Preferences; controlled?: boolean; onChange?: (preferences: Preferences) => void }) {
   const [draftGrounding, setDraftGrounding] = useState(preferences.grounding || "balanced");
   const grounding = controlled ? preferences.grounding || "balanced" : draftGrounding;
   const [draftMode, setDraftMode] = useState(preferences.reading_mode || "auto");
   const mode = controlled ? preferences.reading_mode || "auto" : draftMode;
+  const [draftFormat, setDraftFormat] = useState(preferences.response_delivery || "natural");
+  const format = controlled ? preferences.response_delivery || "natural" : draftFormat;
+  const [draftLength, setDraftLength] = useState(preferences.answer_style || "concise");
+  const length = controlled ? preferences.answer_style || "concise" : draftLength;
+  const recommended = format === "natural" && length === "concise" && mode === "auto";
   const textSize = preferences.answer_text_size ?? 17;
   const [sizeDraft, setSizeDraft] = useState({ base: textSize, value: textSize });
   const displayedTextSize = controlled || sizeDraft.base !== textSize ? textSize : sizeDraft.value;
@@ -100,9 +112,11 @@ export function AnswerPreferenceFields({ preferences, controlled = false, onChan
   return <div className="answer-preference-fields">
     <div className="preference-primary">
       {!controlled && <><CompanyField preferences={preferences} /><RoleField preferences={preferences} /></>}
-      <label>Answer format<select name="response_delivery" {...value("response_delivery", "natural")} onChange={event => onChange?.({ ...preferences, response_delivery: event.target.value as Preferences["response_delivery"] })}><option value="natural">Natural answer</option><option value="talking_points">Talking points</option><option value="structured">Step by step</option></select></label>
-      <label>Answer length<select name="answer_style" {...value("answer_style", "concise")} onChange={event => onChange?.({ ...preferences, answer_style: event.target.value })}><option value="concise">Short</option><option value="balanced">Balanced</option><option value="detailed">Detailed</option></select></label>
-      <label>Hands-free scrolling<select name="reading_mode" {...value("reading_mode", "auto")} onChange={event => { const selected = event.target.value as NonNullable<Preferences["reading_mode"]>; setDraftMode(selected); onChange?.({ ...preferences, reading_mode: selected }); }}><option value="auto">Auto · speech + timed</option><option value="speech">Follow my speech</option><option value="paced">Timed scrolling</option><option value="off">Off</option></select></label>
+      {!recommended && <button type="button" className="preference-preset" onClick={() => { setDraftFormat("natural"); setDraftLength("concise"); setDraftMode("auto"); onChange?.({ ...preferences, response_delivery: "natural", answer_style: "concise", reading_mode: "auto" }); }}><Sparkles size={15} aria-hidden="true" /> Use recommended: Natural · Short · Auto</button>}
+      {recommended && <p className="preference-preset-note"><Sparkles size={15} aria-hidden="true" /> Recommended setup for interviews</p>}
+      <ChipGroup name="response_delivery" label="Answer format" value={format} options={[{ value: "natural", label: "Natural", icon: MessageSquare }, { value: "talking_points", label: "Talking points", icon: ListChecks }, { value: "structured", label: "Step by step", icon: ListOrdered }]} onSelect={selected => { const next = selected as NonNullable<Preferences["response_delivery"]>; setDraftFormat(next); onChange?.({ ...preferences, response_delivery: next }); }} />
+      <ChipGroup name="answer_style" label="Answer length" value={length} options={[{ value: "concise", label: "Short", icon: AlignLeft }, { value: "balanced", label: "Balanced", icon: AlignCenter }, { value: "detailed", label: "Detailed", icon: AlignJustify }]} onSelect={selected => { setDraftLength(selected); onChange?.({ ...preferences, answer_style: selected }); }} />
+      <ChipGroup name="reading_mode" label="Hands-free scrolling" value={mode} options={[{ value: "auto", label: "Auto", icon: AudioLines }, { value: "speech", label: "Follow speech", icon: Mic }, { value: "paced", label: "Timed", icon: Clock3 }, { value: "off", label: "Off", icon: Power }]} onSelect={selected => { const next = selected as NonNullable<Preferences["reading_mode"]>; setDraftMode(next); onChange?.({ ...preferences, reading_mode: next }); }} />
     </div>
     <details className="preference-display"><summary>Reading options</summary>
       <label className="answer-size-control">Answer text size <output>{displayedTextSize}px</output><input aria-label="Answer text size" name="answer_text_size" type="range" min={14} max={24} step={1} value={controlled ? textSize : undefined} defaultValue={controlled ? undefined : textSize} onChange={event => { const next = Number(event.target.value); setSizeDraft({ base: textSize, value: next }); onChange?.({ ...preferences, answer_text_size: next }); }} /></label>
