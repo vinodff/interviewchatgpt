@@ -12,6 +12,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `if(typeof window!=="undefined"&&window.location.hostname.includes("frontend-blush-pi-24.vercel.app")){window.location.replace("https://www.interviewwin.live"+window.location.pathname+window.location.search+window.location.hash);}`,
+          }}
+        />
+      </head>
       <body>
         {children}
       </body>

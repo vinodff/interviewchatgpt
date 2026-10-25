@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     const origin =
       request.headers.get("origin") ||
       request.headers.get("x-forwarded-host") ||
-      "https://frontend-2mj6iletc-vcontenthelper-4975s-projects.vercel.app";
+      "https://www.interviewwin.live";
     const host = origin.startsWith("http") ? origin : `https://${origin}`;
     const returnUrl = `${host}/interview?view=billing&cf_order_id={order_id}`;
 

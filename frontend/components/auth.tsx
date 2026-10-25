@@ -86,7 +86,10 @@ export function Auth({ onAuthenticated, serviceError }: { onAuthenticated: (user
     setError("");
     setBusy(true);
     try {
-      const redirectUrl = typeof window !== "undefined" ? `${window.location.origin}/interview` : undefined;
+      const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+      const redirectUrl = isLocal
+        ? `${window.location.origin}/interview`
+        : (process.env.NEXT_PUBLIC_SITE_URL ? `${process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "")}/interview` : "https://www.interviewwin.live/interview");
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {

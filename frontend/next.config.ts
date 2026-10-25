@@ -18,6 +18,21 @@ const config: NextConfig = {
     if (process.env.VERCEL || process.env.NEXT_PUBLIC_WORKSPACE_MODE === "browser") return [];
     return [{ source: "/api/:path*", destination: `${backend}/api/:path*` }];
   },
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [
+          {
+            type: "host",
+            value: "frontend-blush-pi-24.vercel.app",
+          },
+        ],
+        destination: "https://www.interviewwin.live/:path*",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [{ source: "/:path*", headers: [
       { key: "X-Content-Type-Options", value: "nosniff" },

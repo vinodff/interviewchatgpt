@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { User } from "./types";
 
 /**
  * Vercel + Supabase ONLY server layer, LOGIN FIRST.
@@ -80,6 +81,7 @@ export type UserRow = {
   github_verified_id: number | null; github_verified_username: string;
   profile: Record<string, unknown>; preferences: Record<string, unknown>;
   stripe_customer_id: string | null; cf_customer_id: string | null;
+  credit_seconds?: number | null;
 };
 
 /** Find the users row by email, or create one (plan free) for a first-time Google sign-in. Keyed by the Supabase Auth user id. */
@@ -91,6 +93,7 @@ export async function findOrCreateUser(db: SupabaseClient, authUser: VerifiedAut
   const { data, error } = await db.from("users").insert({
     id: authUser.id, email: authUser.email, name: authUser.name, plan: "free",
     github_username: "", github_verified_username: "", profile: {}, preferences: {},
+    credit_seconds: 0,
   }).select("*").single();
   if (error || !data) throw new Error("Could not load your account from Supabase. Please try again.");
   return data as UserRow;
@@ -102,19 +105,29 @@ export async function usedSeconds(db: SupabaseClient, userId: string): Promise<n
 }
 
 /** The exact User shape the frontend expects (see lib/types.ts). */
-export async function userShape(db: SupabaseClient, row: UserRow): Promise<Record<string, unknown>> {
+export async function userShape(db: SupabaseClient, row: UserRow): Promise<User> {
   const seconds = await usedSeconds(db, row.id);
   const plan = PLAN_LIMITS[row.plan] !== undefined ? row.plan : "free";
+  const freeTrialMinutes = PLAN_LIMITS.free || 2;
+  const creditMinutes = Math.floor((row.credit_seconds || 0) / 60);
+  const planAllowance = plan !== "free" && PLAN_LIMITS[plan] ? PLAN_LIMITS[plan] : 0;
+  const purchasedMinutes = Math.max(creditMinutes, planAllowance);
+  const minuteLimit = freeTrialMinutes + purchasedMinutes;
+  const minutesUsed = Math.round((seconds / 60) * 100) / 100;
+  const creditMinutesRemaining = Math.max(0, Math.round((minuteLimit - minutesUsed) * 100) / 100);
+
   return {
     id: row.id, email: row.email, name: row.name, plan,
     github_username: row.github_username || "",
     profile: row.profile || {}, preferences: row.preferences || {},
     github_verified: Boolean(row.github_verified_id),
     github_verified_username: row.github_verified_username || "",
-    minutes_used: Math.round((seconds / 60) * 100) / 100,
-    minute_limit: PLAN_LIMITS[plan],
+    minutes_used: minutesUsed,
+    minute_limit: minuteLimit,
+    monthly_minute_limit: freeTrialMinutes,
+    credit_minutes_remaining: creditMinutesRemaining,
     testing_mode: false,
-    billing_account: Boolean(row.stripe_customer_id),
+    billing_account: Boolean(row.stripe_customer_id || row.cf_customer_id || purchasedMinutes > 0),
   };
 }
 

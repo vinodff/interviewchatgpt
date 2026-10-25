@@ -33,8 +33,16 @@ class Settings(BaseSettings):
     upload_dir: Path = Path("data/uploads")
     max_upload_bytes: int = 20 * 1024 * 1024
     max_sources: int = 200
-    allowed_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"]
-    public_url: str = "http://localhost:3000"
+    allowed_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "https://www.interviewwin.live",
+        "https://interviewwin.live",
+        "https://frontend-blush-pi-24.vercel.app",
+    ]
+    public_url: str = "https://www.interviewwin.live"
     cookie_secure: bool = False
     session_days: int = 7
     free_minutes: int = Field(default=2, ge=0)
