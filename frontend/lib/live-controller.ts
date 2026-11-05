@@ -55,6 +55,9 @@ export class LiveController {
   private interviewMemory = new InterviewMemory();
   private enhancedMicrophone = false;
   private streamingMicrophone = false;
+  private keepAliveStream: MediaStream | null = null;
+  private keepAliveContext: AudioContext | null = null;
+  private wakeLock: unknown = null;
   private pendingAudioSpeech = "";
   private audioReplies = new Map<string, { text: string; prepared: PreparedAudioReply }>();
   private removeVisibilityListener: (() => void) | null = null;
@@ -179,12 +182,12 @@ export class LiveController {
     this.started = true;
     this.nonEnglishWarned = false;
     this.audioLevelCount = 0;
+    this.enhancedMicrophone = options.enhancedMicrophone === true;
+    this.streamingMicrophone = options.streamingMicrophone === true;
     try {
       if (isBrowserWorkspace()) {
         if (mode !== "microphone") throw new Error("This workspace supports microphone speech only. Shared-tab transcription requires the full backend.");
         this.browserMode = true;
-        this.enhancedMicrophone = options.enhancedMicrophone === true;
-        this.streamingMicrophone = options.streamingMicrophone === true;
         this.session = createStoredSession({ title, audio_mode: mode, retention });
         this.onSession(this.session);
         this.startBrowserLiveMode();
@@ -444,6 +447,18 @@ export class LiveController {
     }
     this.currentAnswerText = "";
     this.answeringQuestion = false;
+    if (this.wakeLock && typeof (this.wakeLock as { release?: () => Promise<void> }).release === "function") {
+      (this.wakeLock as { release: () => Promise<void> }).release().catch(() => undefined);
+      this.wakeLock = null;
+    }
+    if (this.keepAliveStream) {
+      this.keepAliveStream.getTracks().forEach(track => track.stop());
+      this.keepAliveStream = null;
+    }
+    if (this.keepAliveContext) {
+      try { void this.keepAliveContext.close(); } catch { /* ignore */ }
+      this.keepAliveContext = null;
+    }
     const capture = this.capture; this.capture = null;
     try { capture?.stop(); }
     catch { this.notify({ type: "local", error: "Audio capture cleanup reported an error. Check the browser’s microphone sharing indicator." }); }
@@ -455,6 +470,51 @@ export class LiveController {
   private startBrowserLiveMode(): void {
     if (this.stopped) return;
 
+    // Acquire Screen Wake Lock on mobile devices so screen and audio don't sleep
+    if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
+      try {
+        (navigator as unknown as { wakeLock: { request: (type: string) => Promise<unknown> } }).wakeLock.request("screen").then((lock: unknown) => {
+          this.wakeLock = lock;
+        }).catch(() => undefined);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // Keep hardware microphone continuously active on mobile (Android/iOS).
+    // Holding a silent AudioContext source prevents the OS from shutting down the
+    // hardware mic on speech pauses, eliminating status bar mic blinking and missed words.
+    if (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && !this.keepAliveStream && !this.streamingMicrophone) {
+      navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      }).then(stream => {
+        if (this.stopped) {
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+        this.keepAliveStream = stream;
+        try {
+          const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+          if (AudioContextClass) {
+            const ctx = new AudioContextClass();
+            const source = ctx.createMediaStreamSource(stream);
+            const silent = ctx.createGain();
+            silent.gain.value = 0; // completely silent
+            source.connect(silent);
+            silent.connect(ctx.destination);
+            this.keepAliveContext = ctx;
+            if (ctx.state === "suspended") {
+              void ctx.resume().catch(() => undefined);
+            }
+          }
+        } catch { /* AudioContext fallback */ }
+      }).catch(() => undefined);
+    }
 
     // In browser live mode, SpeechRecognition transcribes directly from the microphone.
     // Release the PCM AudioCapture worklet so mobile OS (Android/iOS) frees the hardware microphone.
@@ -768,7 +828,7 @@ export class LiveController {
                 this.notify({ type: "status", state: "listening", detail: enhanced ? microphoneStatus : "Listening through browser speech recognition." });
               } catch { void this.fail("Speech recognition could not restart. Start a new session to continue."); }
             }
-          }, Math.min(250 * 2 ** (restartAttempts - 1), 4000));
+          }, 80);
         };
 
         this.browserRecognition = recognition;

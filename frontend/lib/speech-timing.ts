@@ -14,8 +14,8 @@ export function speechTiming({ text, final, hasContext, corrections = 0 }: { tex
   if (isIncompleteSpeech(request || text)) return { delay_ms: 1900, allow_interim: false, kind: "incomplete" };
   const followUp = hasContext && isContextFollowUp(text);
   if (request || followUp) {
-    const stableDelay = final ? /\?\s*$/.test(text) ? 180 : 260 : 450;
+    const stableDelay = final ? /\?\s*$/.test(text) ? 250 : 350 : 450;
     return { delay_ms: stableDelay + (!final && corrections >= 2 ? 150 : 0), allow_interim: true, kind: followUp ? "follow_up" : "request" };
   }
-  return { delay_ms: final ? 480 : 700, allow_interim: false, kind: "speech" };
+  return { delay_ms: final ? 750 : 950, allow_interim: false, kind: "speech" };
 }

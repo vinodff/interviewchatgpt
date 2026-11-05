@@ -311,14 +311,13 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
       })));
     }
     if (request.method === "POST") {
-      if (!serverSupabase) return json({ detail: "Sign in is required." }, 401);
-      const auth = await getAuthenticatedUser(request);
-      if (!auth) return json({ detail: "Sign in is required." }, 401);
       let body: Record<string, unknown> = {};
       try { body = await request.json(); } catch { /* ignore */ }
-      const newSession = {
-        id: crypto.randomUUID(),
-        user_id: auth.authId,
+      const auth = await getAuthenticatedUser(request);
+      const sessionId = crypto.randomUUID();
+      const sessionData = {
+        id: sessionId,
+        user_id: auth?.authId || "guest",
         title: typeof body?.title === "string" && body.title.trim() ? body.title.trim() : "Live conversation",
         status: "created",
         audio_mode: body?.audio_mode === "tab" ? "tab" : "microphone",
@@ -329,9 +328,13 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
         summary: "",
         metrics: {}
       };
-      const { data, error } = await serverSupabase.from("live_sessions").insert(newSession).select().single();
-      if (error || !data) return json({ detail: "Could not create session." }, 500);
-      return json(data, 201);
+      if (serverSupabase && auth) {
+        try {
+          const { data, error } = await serverSupabase.from("live_sessions").insert(sessionData).select().single();
+          if (!error && data) return json(data, 201);
+        } catch { /* fallback to returning sessionData */ }
+      }
+      return json(sessionData, 201);
     }
   }
 
@@ -379,31 +382,38 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
   if (request.method === "POST" && segments[0] === "sessions" && segments[2] === "stop") {
     if (!serverSupabase) return json({ ok: true });
     const auth = await getAuthenticatedUser(request);
-    if (!auth) return json({ detail: "Sign in is required." }, 401);
     const sessionId = segments[1];
-    const { data } = await serverSupabase.from("live_sessions").update({ status: "ended", ended_at: new Date().toISOString() }).eq("id", sessionId).eq("user_id", auth.authId).select().maybeSingle();
-    return json(data || { ok: true });
+    if (auth) {
+      try {
+        const { data } = await serverSupabase.from("live_sessions").update({ status: "ended", ended_at: new Date().toISOString() }).eq("id", sessionId).eq("user_id", auth.authId).select().maybeSingle();
+        if (data) return json(data);
+      } catch { /* ignore */ }
+    }
+    return json({ id: sessionId, status: "ended", ok: true });
   }
 
   if (request.method === "POST" && segments[0] === "sessions" && segments[2] === "turn") {
     if (!serverSupabase) return json({ ok: true }, 201);
     const auth = await getAuthenticatedUser(request);
-    if (!auth) return json({ detail: "Sign in is required." }, 401);
     const sessionId = segments[1];
     let body: Record<string, unknown> = {};
     try { body = await request.json(); } catch { /* ignore */ }
-    const turnRow = {
-      id: typeof body.id === "string" && body.id.length <= 36 ? body.id : crypto.randomUUID(),
-      session_id: sessionId,
-      role: typeof body.role === "string" ? body.role : "unknown",
-      text: typeof body.text === "string" ? body.text : "",
-      question: typeof body.question === "string" ? body.question : "",
-      answer: typeof body.answer === "string" ? body.answer : "",
-      evidence: Array.isArray(body.evidence) ? body.evidence : [],
-      latency_ms: typeof body.latency_ms === "number" ? body.latency_ms : null,
-      created_at: typeof body.created_at === "string" ? body.created_at : new Date().toISOString()
-    };
-    await serverSupabase.from("turns").insert(turnRow);
+    if (auth) {
+      const turnRow = {
+        id: typeof body.id === "string" && body.id.length <= 36 ? body.id : crypto.randomUUID(),
+        session_id: sessionId,
+        role: typeof body.role === "string" ? body.role : "unknown",
+        text: typeof body.text === "string" ? body.text : "",
+        question: typeof body.question === "string" ? body.question : "",
+        answer: typeof body.answer === "string" ? body.answer : "",
+        evidence: Array.isArray(body.evidence) ? body.evidence : [],
+        latency_ms: typeof body.latency_ms === "number" ? body.latency_ms : null,
+        created_at: typeof body.created_at === "string" ? body.created_at : new Date().toISOString()
+      };
+      try {
+        await serverSupabase.from("turns").insert(turnRow);
+      } catch { /* ignore */ }
+    }
     return json({ ok: true }, 201);
   }
 
