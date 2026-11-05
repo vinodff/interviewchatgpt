@@ -418,6 +418,12 @@ dialog.modal { max-width:620px; width:calc(100% - 32px); max-height:calc(100vh -
   border-color: #9cb8a5 !important;
 }
 
+.account-plan-starter {
+  border: 1.5px solid #93c5fd !important;
+  background: #ffffff !important;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.08) !important;
+}
+
 .account-plan-popular {
   border: 2px solid var(--teal) !important;
   background: #ffffff !important;
@@ -432,6 +438,15 @@ dialog.modal { max-width:620px; width:calc(100% - 32px); max-height:calc(100vh -
 
 .account-plan-selected {
   outline: 2px solid var(--teal);
+}
+
+.plan-tax-note {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 8px;
+  line-height: 1.4;
 }
 
 /* Top Badges */

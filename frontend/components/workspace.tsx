@@ -27,6 +27,10 @@ const navigation = [
 ] as const;
 
 export function Workspace({ initialPage = "overview", initialRegister = false, initialPlan }: { initialPage?: Page; initialRegister?: boolean; initialPlan?: "starter" | "pro" | "value" }) {
+  const [resetActive, setResetActive] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return Boolean(new URLSearchParams(window.location.search).get("reset"));
+  });
   const [user, setUser] = useState<User | null>(null);
   const [initial, setInitial] = useState(true);
   const [page, setPage] = useState<Page>(initialPage);
@@ -115,17 +119,6 @@ export function Workspace({ initialPage = "overview", initialRegister = false, i
 
     async function initAuth() {
       try {
-        if (supabase) {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) {
-            const value = await fetchSupabaseMe();
-            if (cancelled) return;
-            identity.current = value.id;
-            setUser(value);
-            void refresh();
-            return;
-          }
-        }
         const value = await api<User>("/auth/me", { signal: controller.signal });
         if (cancelled) return;
         identity.current = value.id;
@@ -133,7 +126,11 @@ export function Workspace({ initialPage = "overview", initialRegister = false, i
         void refresh();
       } catch (error) {
         if (!cancelled && !controller.signal.aborted) {
-          setError(error instanceof ApiError && error.status === 401 ? "" : messageOf(error));
+          if (error instanceof ApiError && error.status === 401) {
+            setError("");
+          } else {
+            setError(messageOf(error));
+          }
         }
       } finally {
         clearTimeout(timer);
@@ -218,8 +215,21 @@ export function Workspace({ initialPage = "overview", initialRegister = false, i
       setLoading(false);
     }
   }
-  if (initial) return <main className="initial-loader"><Brand /><AudioLines size={30} className="pulse" /><p>Getting your interview ready…</p></main>;
-  if (!user) return <Auth initialRegister={initialRegister} onAuthenticated={value => { updateUser(value); void refresh(); }} serviceError={error} />;
+  if (initial && !resetActive && !initialRegister) return <main className="initial-loader"><Brand /><AudioLines size={30} className="pulse" /><p>Getting your interview ready…</p></main>;
+  if (!user || resetActive) {
+    return (
+      <Auth
+        initialRegister={initialRegister}
+        onResetDone={() => setResetActive(false)}
+        onAuthenticated={value => {
+          setResetActive(false);
+          updateUser(value);
+          void refresh();
+        }}
+        serviceError={error}
+      />
+    );
+  }
   const visibleNavigation = navigation;
   const ready = sources.filter(source => source.status === "ready").length;
   const renderEpoch = authVersion;

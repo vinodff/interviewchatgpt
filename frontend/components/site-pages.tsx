@@ -41,7 +41,7 @@ function HowItWorksPage() {
 }
 
 function PlansPage() {
-  return <><PageIntro eyebrow="FREE. STARTER. PRO." title="A plan for your next interview." description="Start with 30 free minutes. Choose a monthly plan when you need more interview time." /><PricingSection full />
+  return <><PageIntro eyebrow="TRANSPARENT PRICING" title="A plan for your next interview." description="Start free with live interview minutes. Choose a plan when you need more interview time." /><PricingSection full />
     <section className="landing-container pricing-faq" aria-label="Pricing questions"><h2>A few clear answers.</h2><details><summary>What counts as a live minute?</summary><p>Time connected during a live interview counts toward your allowance. Uploading your resume, adjusting preferences, and reviewing saved interviews do not use live minutes.</p></details><details><summary>When do my minutes reset?</summary><p>Your allowance resets at the start of each calendar month. Unused minutes do not roll over. Paid subscriptions renew monthly from the subscription date.</p></details><details><summary>What happens when I use all my minutes?</summary><p>Live assistance stops at your limit. You can wait for the next monthly reset or choose an available paid plan. There are no automatic overage charges.</p></details><details><summary>Can I change or cancel a paid plan?</summary><p>Use Plans &amp; billing to open subscription management when paid plans are available. Review the terms shown there before confirming a change. <Link href="/contact">Contact support</Link> if you need help.</p></details></section><SiteCta /></>;
 }
 

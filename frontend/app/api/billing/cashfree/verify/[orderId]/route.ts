@@ -64,15 +64,8 @@ export async function GET(
             .eq("order_id", orderId)
             .maybeSingle();
 
-          const targetUserId =
-            existingOrder?.user_id ||
-            (data.customer_details?.customer_id?.startsWith("cust_")
-              ? data.customer_details.customer_id.replace("cust_", "")
-              : null);
-
-          const customerPhone = data.customer_details?.customer_phone || existingOrder?.phone;
-
           if (existingOrder && existingOrder.status !== "PAID") {
+            const customerPhone = data.customer_details?.customer_phone || existingOrder?.phone;
             const orderUpdates: Record<string, unknown> = {
               status: "PAID",
               paid_at: new Date().toISOString(),
@@ -85,38 +78,38 @@ export async function GET(
               .from("payment_orders")
               .update(orderUpdates)
               .eq("order_id", orderId);
-          }
 
-          if (targetUserId) {
-            try {
-              await db.rpc("add_credits_for_user", {
-                p_user_id: targetUserId,
-                p_amount: minutes,
-                p_plan: plan,
-              });
-              if (customerPhone) {
-                await db.from("users").update({ phone: customerPhone }).eq("id", targetUserId);
-              }
-            } catch {
-              const { data: userRow } = await db
-                .from("users")
-                .select("id, credit_seconds, plan, phone")
-                .eq("id", targetUserId)
-                .maybeSingle();
-
-              if (userRow) {
-                const currentSeconds = userRow.credit_seconds || 0;
-                const userUpdates: Record<string, unknown> = {
-                  plan,
-                  credit_seconds: currentSeconds + minutes * 60,
-                };
+            const targetUserId = existingOrder.user_id;
+            if (targetUserId) {
+              try {
+                await db.rpc("add_credits_for_user", {
+                  p_user_id: targetUserId,
+                  p_amount: minutes,
+                  p_plan: plan,
+                });
                 if (customerPhone) {
-                  userUpdates.phone = customerPhone;
+                  await db.from("users").update({ phone: customerPhone }).eq("id", targetUserId);
                 }
-                await db
+              } catch {
+                const { data: userRow } = await db
                   .from("users")
-                  .update(userUpdates)
-                  .eq("id", targetUserId);
+                  .select("id, credit_seconds, plan, phone")
+                  .eq("id", targetUserId)
+                  .maybeSingle();
+
+                if (userRow) {
+                  const currentSeconds = userRow.credit_seconds || 0;
+                  const userUpdates: Record<string, unknown> = {
+                    credit_seconds: currentSeconds + minutes * 60,
+                  };
+                  if (customerPhone && !userRow.phone) {
+                    userUpdates.phone = customerPhone;
+                  }
+                  await db
+                    .from("users")
+                    .update(userUpdates)
+                    .eq("id", targetUserId);
+                }
               }
             }
           }

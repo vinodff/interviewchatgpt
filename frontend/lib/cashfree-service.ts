@@ -1,4 +1,3 @@
-import { supabase } from "./supabase";
 import { loadCashfree } from "./billing-checkout";
 
 export interface CashfreeOrder {
@@ -172,24 +171,5 @@ export class CashfreeService {
       window.location.href = bridgeUrl;
     }
     return true;
-  }
-
-  /**
-   * Finalizes credits in the database via the Supabase add_credits RPC function.
-   */
-  static async finalizeCredits(minutes: number, plan: string): Promise<void> {
-    try {
-      if (!supabase) return;
-      const { error } = await supabase.rpc("add_credits", {
-        p_amount: minutes,
-        p_plan: plan,
-      });
-      if (error) {
-        console.warn("RPC add_credits returned an error:", error.message);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn("Could not call add_credits RPC directly:", message);
-    }
   }
 }

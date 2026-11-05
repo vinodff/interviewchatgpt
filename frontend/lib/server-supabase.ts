@@ -93,7 +93,7 @@ export async function getAuthenticatedUser(request: NextRequest): Promise<{ user
   if (error || !authUser) return null;
 
   let { data: userRow } = await supabase.from("users").select("*").eq("id", authUser.id).maybeSingle();
-  if (!userRow && authUser.email) {
+  if (!userRow && authUser.email && Boolean(authUser.email_confirmed_at)) {
     const { data: byEmail } = await supabase.from("users").select("*").eq("email", authUser.email).maybeSingle();
     if (byEmail) userRow = byEmail;
   }

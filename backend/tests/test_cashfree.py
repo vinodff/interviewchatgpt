@@ -16,7 +16,8 @@ from app.config import settings
 from app.db import SessionLocal, engine
 from app.models import Base, PaymentOrder, User
 from app.services import cashfree
-from tests.test_api import HEADERS, client as client, signup
+from tests.test_api import client as client
+from tests.test_api import signup
 
 pytest_plugins = ["tests.test_api"]
 
@@ -109,6 +110,8 @@ async def test_order_and_user_store_phone(monkeypatch):
 
 
 def test_cashfree_create_order_and_verify_credits(client, monkeypatch):
+    monkeypatch.setattr("app.api.rate_limit", AsyncMock(return_value=True))
+    monkeypatch.setattr("app.security.rate_limit", AsyncMock(return_value=True))
     test_user_email = f"cf_credits_{secrets.token_hex(4)}@example.com"
     signup(client, test_user_email)
     monkeypatch.setattr(settings, "cashfree_app_id", "test-app-id")
@@ -174,6 +177,8 @@ def test_cashfree_create_order_and_verify_credits(client, monkeypatch):
 
 
 def test_cashfree_webhook_credit_grant(client, monkeypatch):
+    monkeypatch.setattr("app.api.rate_limit", AsyncMock(return_value=True))
+    monkeypatch.setattr("app.security.rate_limit", AsyncMock(return_value=True))
     test_user_email = f"cf_wh_{secrets.token_hex(4)}@example.com"
     signup(client, test_user_email)
     monkeypatch.setattr(settings, "cashfree_app_id", "test-app-id")

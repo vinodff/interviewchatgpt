@@ -1,28 +1,152 @@
 import Link from "next/link";
-import { ArrowRight, Check, ShieldCheck } from "lucide-react";
+import { ArrowRight, Check, Clock, Crown, ShieldCheck, Zap } from "lucide-react";
 import { loadPlans } from "@/lib/server-plans";
-import { formatPlanPrice } from "@/lib/plans";
-
-const descriptions: Record<string, string> = {
-  free: "Try live interview assistance.",
-  starter: "More time for your next few interviews.",
-  pro: "For an active interview schedule.",
-  value: "Comprehensive support for full interview loops.",
-};
+import { PLAN_DETAILS } from "@/lib/plan-details";
 
 export async function PricingSection({ full = false }: { full?: boolean }) {
   const catalog = await loadPlans();
-  return <section className={`pricing-section landing-container ${full ? "pricing-full" : ""}`} id="pricing" aria-label="Interview plans">
-    {!full && <div className="landing-section-heading" data-reveal><p className="eyebrow">SIMPLE MONTHLY PLANS</p><h2>Start free. Choose more time.</h2><p>Three plans. The same helpful interview tools.</p></div>}
-    <div className="pricing-grid">{catalog.plans.map((plan, index) => <article className={`pricing-card ${plan.id === "starter" ? "pricing-featured" : ""}`} key={plan.id} data-reveal data-reveal-delay={index * 60}>
-      <div className="pricing-card-heading"><h2>{plan.name}</h2>{plan.id === "starter" && <span>More time to prepare</span>}</div>
-      <p>{descriptions[plan.id]}</p><div className="pricing-amount">{formatPlanPrice(plan.amount)}<span>{plan.id === "free" ? "forever" : "/ month (INR)"}</span></div>
-      <p className="pricing-minutes"><strong>{plan.minutes} live minutes</strong> per calendar month</p>
-      <ul><li><Check size={17} />Live answer suggestions</li><li><Check size={17} />Resume and project context</li><li><Check size={17} />Your preferred answer style</li><li><Check size={17} />Adjustable reading options</li></ul>
-      <Link href={plan.id === "free" ? "/interview?view=live&signup=1" : `/interview?view=billing&plan=${plan.id}`} className={`button ${plan.id === "starter" ? "button-primary" : "button-secondary"}`}>{plan.id === "free" ? "Start free interview" : "Get Started"}<ArrowRight size={16} /></Link>
-      <small>{plan.id === "free" ? "No credit card required for the Free plan." : "All prices in Indian Rupees (INR). Inclusive of all taxes."}</small>
-    </article>)}</div>
-    <p className="pricing-note"><ShieldCheck size={16} />All plans and services are priced in Indian Rupees (INR) and are inclusive of all applicable taxes. Transactions are secured and processed via Cashfree Payments India Pvt. Ltd. with instant digital service delivery.</p>
-    {!full && <Link href="/plans" className="landing-secondary">Compare all plans <ArrowRight size={16} /></Link>}
-  </section>;
+
+  return (
+    <section
+      className={`pricing-section landing-container ${full ? "pricing-full" : ""}`}
+      id="pricing"
+      aria-label="Interview plans"
+    >
+      {!full && (
+        <div className="landing-section-heading" data-reveal>
+          <p className="eyebrow">SIMPLE TRANSPARENT PLANS</p>
+          <h2>Start free. Choose more time.</h2>
+          <p>Four flexible plans tailored for every stage of your interview journey.</p>
+        </div>
+      )}
+
+      <div className="pricing-grid account-plan-grid-modern">
+        {catalog.plans.map((plan, index) => {
+          const details = PLAN_DETAILS[plan.id];
+          const isPopular = plan.id === "pro";
+          const isValue = plan.id === "value";
+          const isStarter = plan.id === "starter";
+
+          const checkoutHref =
+            plan.id === "free"
+              ? "/interview?view=live&signup=1"
+              : `/interview?view=billing&plan=${plan.id}`;
+
+          const buttonText =
+            plan.id === "free"
+              ? "Start free interview"
+              : isPopular
+              ? "Upgrade to Popular"
+              : isValue
+              ? "Upgrade to Value"
+              : "Get Starter";
+
+          return (
+            <article
+              className={`panel account-plan-card ${
+                isPopular ? "account-plan-popular" : ""
+              } ${isValue ? "account-plan-value" : ""} ${
+                isStarter ? "account-plan-starter" : ""
+              }`}
+              key={plan.id}
+              data-reveal
+              data-reveal-delay={index * 60}
+            >
+              {/* Top floating badge */}
+              {details?.badge && (
+                <div
+                  className="plan-badge-top"
+                  style={{ backgroundColor: details.badgeColor }}
+                >
+                  {details.badge}
+                </div>
+              )}
+
+              {/* Card Header */}
+              <div className="plan-header">
+                <div className="plan-name-row">
+                  <h3>{plan.name}</h3>
+                  {isPopular && <Crown size={18} style={{ color: "#d97706" }} />}
+                </div>
+                <p className="plan-tagline">{details?.tagline}</p>
+              </div>
+
+              {/* Price Block */}
+              <div className="account-plan-price-block">
+                <span className="price-currency">₹</span>
+                <span className="price-amount">{plan.amount / 100}</span>
+                <span className="price-period">
+                  {plan.id === "free" ? " forever" : " / month"}
+                </span>
+              </div>
+
+              {/* Live Minutes Pill */}
+              <div className="plan-minutes-highlight">
+                <Clock size={16} />
+                <strong>{plan.minutes} Live Minutes</strong>
+              </div>
+
+              {/* Action Button */}
+              <div className="plan-cta-box">
+                <Link
+                  href={checkoutHref}
+                  className={`plan-button-main ${
+                    isPopular ? "plan-button-popular" : ""
+                  }`}
+                >
+                  {plan.id !== "free" && <Zap size={16} />}
+                  <span>{buttonText}</span>
+                  <ArrowRight size={16} />
+                </Link>
+                <small className="plan-tax-note">
+                  {plan.id === "free"
+                    ? "No credit card required for the Free plan."
+                    : "All prices in INR. Inclusive of all taxes."}
+                </small>
+              </div>
+
+              {/* Features List */}
+              {details?.features && (
+                <div className="plan-features-section">
+                  <div className="plan-features-label">WHAT&apos;S INCLUDED:</div>
+                  <ul className="plan-features-list">
+                    {details.features.map((feat, idx) => (
+                      <li
+                        key={idx}
+                        className={
+                          feat.highlight ? "feature-item-highlight" : "feature-item"
+                        }
+                      >
+                        <span className="feature-check-icon">
+                          <Check size={14} />
+                        </span>
+                        <span className="feature-text">
+                          {feat.text}
+                          {feat.tag && (
+                            <span className="feature-tag-inline">{feat.tag}</span>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+
+      <p className="pricing-note">
+        <ShieldCheck size={16} />
+        All plans and services are priced in Indian Rupees (INR) and are inclusive of all applicable taxes.
+        Transactions are secured and processed via Cashfree Payments India Pvt. Ltd. with instant digital service delivery.
+      </p>
+
+      {!full && (
+        <Link href="/plans" className="landing-secondary">
+          Compare all plans <ArrowRight size={16} />
+        </Link>
+      )}
+    </section>
+  );
 }

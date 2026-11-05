@@ -49,7 +49,7 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
           const { data: { user: authUser }, error } = await serverSupabase.auth.getUser(token);
           if (error || !authUser) return json({ detail: "Invalid Supabase session token." }, 401);
           let { data: userRow } = await serverSupabase.from("users").select("*").eq("id", authUser.id).maybeSingle();
-          if (!userRow && authUser.email) {
+          if (!userRow && authUser.email && Boolean(authUser.email_confirmed_at)) {
             const { data: byEmail } = await serverSupabase.from("users").select("*").eq("email", authUser.email).maybeSingle();
             if (byEmail) userRow = byEmail;
           }

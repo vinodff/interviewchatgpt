@@ -52,9 +52,16 @@ try {
 $pythonPath = Join-Path $backendPath '.venv\Scripts\python.exe'
 $backend = Start-Process -FilePath $pythonPath -ArgumentList '-m','scripts.run_local','--port',"$BackendPort" -WorkingDirectory $backendPath -WindowStyle Hidden -RedirectStandardOutput (Join-Path $dataPath 'backend-out.log') -RedirectStandardError (Join-Path $dataPath 'backend-error.log') -PassThru
 $worker = Start-Process -FilePath $pythonPath -ArgumentList '-m','app.services.worker' -WorkingDirectory $backendPath -WindowStyle Hidden -RedirectStandardOutput (Join-Path $dataPath 'worker-out.log') -RedirectStandardError (Join-Path $dataPath 'worker-error.log') -PassThru
-$nextPath = Join-Path $frontendPath 'node_modules\next\dist\bin\next'
 $nodePath = (Get-Command node.exe).Source
-$frontend = Start-Process -FilePath $nodePath -ArgumentList ('"' + $nextPath + '"'),'start','--hostname','127.0.0.1','--port',"$FrontendPort" -WorkingDirectory $frontendPath -WindowStyle Hidden -RedirectStandardOutput (Join-Path $dataPath 'frontend-out.log') -RedirectStandardError (Join-Path $dataPath 'frontend-error.log') -PassThru
+$standaloneServer = Join-Path $frontendPath '.next\standalone\server.js'
+if (Test-Path $standaloneServer) {
+    $env:PORT = "$FrontendPort"
+    $env:HOSTNAME = "127.0.0.1"
+    $frontend = Start-Process -FilePath $nodePath -ArgumentList ('"' + $standaloneServer + '"') -WorkingDirectory $frontendPath -WindowStyle Hidden -RedirectStandardOutput (Join-Path $dataPath 'frontend-out.log') -RedirectStandardError (Join-Path $dataPath 'frontend-error.log') -PassThru
+} else {
+    $nextPath = Join-Path $frontendPath 'node_modules\next\dist\bin\next'
+    $frontend = Start-Process -FilePath $nodePath -ArgumentList ('"' + $nextPath + '"'),'start','--hostname','127.0.0.1','--port',"$FrontendPort" -WorkingDirectory $frontendPath -WindowStyle Hidden -RedirectStandardOutput (Join-Path $dataPath 'frontend-out.log') -RedirectStandardError (Join-Path $dataPath 'frontend-error.log') -PassThru
+}
 @{backend=$backend.Id; worker=$worker.Id; frontend=$frontend.Id} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataPath 'local-processes.json')
 Write-Output "InterviewPilot Live: http://localhost:$FrontendPort"
 Write-Output "API documentation: http://localhost:$BackendPort/api/docs"

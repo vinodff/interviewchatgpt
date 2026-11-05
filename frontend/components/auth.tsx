@@ -33,7 +33,17 @@ function GoogleIcon() {
   );
 }
 
-export function Auth({ onAuthenticated, serviceError }: { onAuthenticated: (user: User) => void; serviceError: string; initialRegister?: boolean }) {
+export function Auth({
+  onAuthenticated,
+  serviceError,
+  initialRegister,
+  onResetDone,
+}: {
+  onAuthenticated: (user: User) => void;
+  serviceError: string;
+  initialRegister?: boolean;
+  onResetDone?: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showEmailFallback, setShowEmailFallback] = useState(false);

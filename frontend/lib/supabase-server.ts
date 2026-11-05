@@ -48,7 +48,7 @@ export function getServiceClientSafe(): SupabaseClient | null {
   return createClient(supabaseUrl(), key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-export type VerifiedAuthUser = { id: string; email: string; name: string };
+export type VerifiedAuthUser = { id: string; email: string; name: string; email_confirmed_at?: string | null };
 
 /** Validate the caller's Supabase JWT via Supabase Auth (getUser). The token itself is never trusted as an identity claim. */
 export async function verifySupabaseUser(request: Request): Promise<VerifiedAuthUser> {
@@ -73,7 +73,7 @@ export async function verifySupabaseUser(request: Request): Promise<VerifiedAuth
     (typeof metadata.full_name === "string" && metadata.full_name) ||
     (typeof metadata.name === "string" && metadata.name) ||
     data.user.email.split("@")[0];
-  return { id: data.user.id, email: data.user.email, name };
+  return { id: data.user.id, email: data.user.email, name, email_confirmed_at: data.user.email_confirmed_at };
 }
 
 export type UserRow = {
@@ -89,8 +89,10 @@ export type UserRow = {
 export async function findOrCreateUser(db: SupabaseClient, authUser: VerifiedAuthUser): Promise<UserRow> {
   const { data: byId } = await db.from("users").select("*").eq("id", authUser.id).maybeSingle();
   if (byId) return byId as UserRow;
-  const { data: byEmail } = await db.from("users").select("*").eq("email", authUser.email).maybeSingle();
-  if (byEmail) return byEmail as UserRow;
+  if (authUser.email && authUser.email_confirmed_at) {
+    const { data: byEmail } = await db.from("users").select("*").eq("email", authUser.email).maybeSingle();
+    if (byEmail) return byEmail as UserRow;
+  }
   const { data, error } = await db.from("users").insert({
     id: authUser.id, email: authUser.email, name: authUser.name, plan: "free",
     github_username: "", github_verified_username: "", profile: {}, preferences: {},

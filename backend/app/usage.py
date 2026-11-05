@@ -59,6 +59,7 @@ async def user_dict(db: AsyncSession, user: User) -> dict:
         "minutes_used": used,
         "minute_limit": limit,
         "monthly_minute_limit": plan_base,
+        "credit_seconds": credit_sec,
         "credit_minutes_remaining": max(0, round(credit_sec / 60, 2)) if limit is not None else None,
         "testing_mode": settings.testing_user(user.id),
         "billing_account": bool(user.stripe_customer_id or user.cf_customer_id or credit_sec > 0),
