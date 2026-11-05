@@ -4,9 +4,12 @@ import type { Evidence, Preferences, Project, Session, Source, Turn, User } from
 
 export function getServerSupabase(): SupabaseClient | null {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
-  if (!supabaseUrl || !supabaseAnonKey) return null;
-  return createClient(supabaseUrl, supabaseAnonKey, {
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+    "";
+  if (!supabaseUrl || !supabaseKey) return null;
+  return createClient(supabaseUrl, supabaseKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
@@ -20,6 +23,24 @@ export function extractAuthToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
   if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
     return authHeader.slice(7).trim();
+  }
+  for (const cookieItem of request.cookies.getAll()) {
+    if (cookieItem.name.startsWith("sb-") && cookieItem.name.endsWith("-auth-token")) {
+      try {
+        const val = decodeURIComponent(cookieItem.value);
+        if (val.startsWith("[")) {
+          const arr = JSON.parse(val);
+          if (Array.isArray(arr) && typeof arr[0] === "string") return arr[0];
+        } else if (val.startsWith("{")) {
+          const obj = JSON.parse(val);
+          if (typeof obj?.access_token === "string") return obj.access_token;
+        } else if (val.length > 50) {
+          return val;
+        }
+      } catch {
+        // ignore
+      }
+    }
   }
   return null;
 }
@@ -115,7 +136,7 @@ export async function getAuthenticatedUser(request: NextRequest): Promise<{ user
   }
 
   const user = await formatUserResponse(supabase, userRow);
-  return { user, token, authId: authUser.id };
+  return { user, token, authId: userRow.id };
 }
 
 export function setSessionCookie(response: NextResponse, token: string): void {

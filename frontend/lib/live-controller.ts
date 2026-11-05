@@ -198,7 +198,17 @@ export class LiveController {
       this.notify({ type: "local", phase: "connecting", detail: "Connecting your authorized conversation…" });
       // Do not abort creation: a late successful response supplies the ID needed to close
       // a session created while Stop was clicked. Capture itself stops immediately.
-      const session = await api<Session>("/sessions", post({ consent: true, audio_mode: mode, title: title.trim() || "Live conversation", retention }));
+      let session: Session;
+      try {
+        session = await api<Session>("/sessions", post({ consent: true, audio_mode: mode, title: title.trim() || "Live conversation", retention }));
+      } catch (sessError) {
+        console.warn("Could not create remote session, falling back to browser live mode:", sessError);
+        this.browserMode = true;
+        this.session = createStoredSession({ title, audio_mode: mode, retention });
+        this.onSession(this.session);
+        this.startBrowserLiveMode();
+        return;
+      }
       this.session = session;
       if (this.stopped) { if (this.stopRemote) await this.finishRemoteSession(); return; }
       this.onSession(session);
@@ -390,8 +400,14 @@ export class LiveController {
     const id = this.session.id;
     this.remoteStop = (async () => {
       try {
-        const ended = this.browserMode ? stopStoredSession(id) : await api<Session>(`/sessions/${encodeURIComponent(id)}/stop`, post());
-        this.onSession(ended);
+        let ended: Session | null = null;
+        if (this.browserMode) {
+          try { ended = stopStoredSession(id); } catch { /* ignore */ }
+        }
+        if (!ended) {
+          try { ended = await api<Session>(`/sessions/${encodeURIComponent(id)}/stop`, post()); } catch { /* ignore */ }
+        }
+        if (ended) this.onSession(ended);
       } catch (error) {
         this.notify({ type: "local", error: `Capture is stopped. Session status could not be saved: ${messageOf(error)}` });
       }

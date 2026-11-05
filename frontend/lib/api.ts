@@ -39,6 +39,33 @@ function defaultError(status: number): string {
   return "The server could not complete this request. Check your input and try again.";
 }
 
+let memoryToken: string | null = null;
+
+export function setApiAuthToken(token: string | null): void {
+  memoryToken = token;
+}
+
+export function getApiAuthToken(): string | null {
+  return memoryToken;
+}
+
+async function resolveAuthToken(): Promise<string | null> {
+  if (memoryToken) return memoryToken;
+  if (typeof window === "undefined") return null;
+  try {
+    const { supabase } = await import("./supabase");
+    if (!supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    if (data?.session?.access_token) {
+      memoryToken = data.session.access_token;
+      return memoryToken;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 /** Workspace storage is explicit; a failed backend call never changes modes. */
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   options.signal?.throwIfAborted();
@@ -57,6 +84,12 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const headers = new Headers(options.headers);
   headers.set("X-InterviewPilot", "1");
   if (options.body && !(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
+
+  if (!headers.has("Authorization")) {
+    const token = await resolveAuthToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+  }
+
   let response: Response;
   try {
     response = await fetch(`/api${path}`, { ...options, headers, credentials: "include", cache: "no-store" });
@@ -89,6 +122,12 @@ export const formatDate = (date: string) => new Date(date).toLocaleDateString(un
 export async function streamApi(path: string, options: RequestInit, onEvent: (event: Record<string, unknown>) => void): Promise<void> {
   const headers = new Headers(options.headers);
   headers.set("X-InterviewPilot", "1"); headers.set("Content-Type", "application/json");
+
+  if (!headers.has("Authorization")) {
+    const token = await resolveAuthToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+  }
+
   let response: Response;
   try { response = await fetch(`/api${path}`, { ...options, headers, credentials: "include", cache: "no-store" }); }
   catch (error) { if (isAbort(error, options.signal)) throw error; throw new ApiError(backendUnavailable, 0); }

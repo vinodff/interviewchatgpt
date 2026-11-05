@@ -2,7 +2,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ArrowRight, Check, FileText, LockKeyhole, Radio, Sparkles } from "lucide-react";
-import { api, messageOf, post } from "@/lib/api";
+import { api, messageOf, post, setApiAuthToken } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { fetchSupabaseMe } from "@/lib/supabase-identity";
 import type { User } from "@/lib/types";
@@ -58,6 +58,15 @@ export function Auth({
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user && !cancelled) {
             setBusy(true);
+            if (session.access_token) {
+              setApiAuthToken(session.access_token);
+              void fetch("/api/auth/supabase-session", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ access_token: session.access_token }),
+                credentials: "include"
+              }).catch(() => {});
+            }
             const user = await fetchSupabaseMe();
             if (!cancelled) onAuthenticated(user);
           }
@@ -76,6 +85,15 @@ export function Auth({
         if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && !cancelled) {
           setBusy(true);
           try {
+            if (session.access_token) {
+              setApiAuthToken(session.access_token);
+              void fetch("/api/auth/supabase-session", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ access_token: session.access_token }),
+                credentials: "include"
+              }).catch(() => {});
+            }
             const user = await fetchSupabaseMe();
             if (!cancelled) onAuthenticated(user);
           } catch (err) {

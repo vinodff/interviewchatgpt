@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { ArrowRight, AudioLines, BookOpen, Check, ChevronRight, Clock3, CreditCard, FileText, Folder, LayoutDashboard, LogOut, Menu, Radio, RefreshCw, ShieldCheck, UserRound, X } from "lucide-react";
-import { api, ApiError, formatDate, messageOf, post } from "@/lib/api";
+import { api, ApiError, formatDate, messageOf, post, setApiAuthToken } from "@/lib/api";
 import { fetchSupabaseMe } from "@/lib/supabase-identity";
 import type { Health, Project, Session, Source, User } from "@/lib/types";
 import { supabase } from "@/lib/supabase";
@@ -62,7 +62,18 @@ export function Workspace({ initialPage = "overview", initialRegister = false, i
     if (supabase) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) return await fetchSupabaseMe();
+        if (session?.user) {
+          if (session.access_token) {
+            setApiAuthToken(session.access_token);
+            void fetch("/api/auth/supabase-session", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ access_token: session.access_token }),
+              credentials: "include"
+            }).catch(() => {});
+          }
+          return await fetchSupabaseMe();
+        }
       } catch { /* fall through to backend auth */ }
     }
     return await api<User>("/auth/me", { signal });
@@ -203,6 +214,7 @@ export function Workspace({ initialPage = "overview", initialRegister = false, i
     try { await liveStop.current?.(); } catch { /* Unmount cleanup still runs below. */ }
     dataRequest.current?.abort();
     try {
+      setApiAuthToken(null);
       if (supabase) await supabase.auth.signOut().catch(() => {});
       await api("/auth/logout", post()).catch(() => {});
       updateUser(null);
