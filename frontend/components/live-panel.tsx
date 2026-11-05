@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
-import { AudioLines, BookOpen, Check, ChevronDown, Clock3, Headphones, Mic, MonitorUp, Radio, ShieldCheck, Square, Waves } from "lucide-react";
+import { AudioLines, BookOpen, Briefcase, Check, CheckCircle2, ChevronDown, Clock3, FileText, Headphones, Loader2, Mic, MonitorUp, Radio, ShieldCheck, Square, UploadCloud, Waves } from "lucide-react";
 import { isBrowserWorkspace } from "@/lib/workspace-mode";
-import { messageOf } from "@/lib/api";
+import { api, messageOf } from "@/lib/api";
 import { LiveController, type LocalEvent } from "@/lib/live-controller";
 import { initialLiveState, reduceLiveMessage, type LiveMessage, type LiveState } from "@/lib/protocol";
 import { ANSWER_HEIGHT_DEFAULT, ANSWER_HEIGHT_KEY, ANSWER_HEIGHT_MAX, ANSWER_HEIGHT_MIN, answerHeightFromDrag, answerHeightFromKey, clampAnswerHeight, displayedAnswerHeight, readAnswerHeight } from "@/lib/mobile-live-layout";
@@ -33,7 +33,69 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
   const [microphoneLevel, setMicrophoneLevel] = useState<MicrophoneLevel | null>(null);
   const browserWorkspace = useSyncExternalStore(subscribeCaptureCapability, isBrowserWorkspace, serverCaptureSnapshot);
   const tabCaptureAvailable = useSyncExternalStore(subscribeCaptureCapability, tabCaptureSnapshot, serverCaptureSnapshot);
-  const [consent, setConsent] = useState(false);
+  const ROLE_PRESETS = [
+    { id: "swe", label: "Software Engineer" },
+    { id: "frontend", label: "Frontend Developer" },
+    { id: "backend", label: "Backend Developer" },
+    { id: "fullstack", label: "Full Stack Engineer" },
+    { id: "system_design", label: "System Design" },
+    { id: "pm", label: "Product Manager" },
+    { id: "behavioral", label: "Behavioral & STAR" },
+  ];
+
+  const currentRole = user.preferences?.role || "Software Engineer";
+  const [selectedRole, setSelectedRole] = useState(currentRole);
+  const [isCustomRole, setIsCustomRole] = useState(!ROLE_PRESETS.some(r => r.label.toLowerCase() === currentRole.toLowerCase()));
+  const [customRoleText, setCustomRoleText] = useState(!ROLE_PRESETS.some(r => r.label.toLowerCase() === currentRole.toLowerCase()) ? currentRole : "");
+
+  const existingResume = sources.find(s =>
+    s.kind === "pdf" ||
+    s.kind === "docx" ||
+    s.kind === "document" ||
+    s.name.toLowerCase().includes("resume") ||
+    s.name.toLowerCase().includes("cv")
+  ) || null;
+  const [activeResume, setActiveResume] = useState<Source | { name: string; id: string } | null>(existingResume);
+  const [isUploadingResume, setIsUploadingResume] = useState(false);
+  const [resumeUploadError, setResumeUploadError] = useState("");
+
+  function handleRoleChange(newRole: string) {
+    setSelectedRole(newRole);
+    setIsCustomRole(false);
+    onUser({ ...user, preferences: { ...user.preferences, role: newRole } });
+    void api("/profile", { method: "PATCH", body: JSON.stringify({ preferences: { ...user.preferences, role: newRole } }) }).catch(() => {});
+  }
+
+  function handleCustomRoleSubmit() {
+    const trimmed = customRoleText.trim();
+    if (!trimmed) return;
+    setSelectedRole(trimmed);
+    onUser({ ...user, preferences: { ...user.preferences, role: trimmed } });
+    void api("/profile", { method: "PATCH", body: JSON.stringify({ preferences: { ...user.preferences, role: trimmed } }) }).catch(() => {});
+  }
+
+  async function handleResumeUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingResume(true);
+    setResumeUploadError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const newSource = await api<Source>("/sources/upload", { method: "POST", body: formData });
+      setActiveResume(newSource);
+      try {
+        const { uploadStoredSource } = await import("@/lib/browser-storage");
+        await uploadStoredSource(file, null);
+      } catch { /* browser storage fallback */ }
+    } catch (err) {
+      setResumeUploadError(messageOf(err));
+    } finally {
+      setIsUploadingResume(false);
+    }
+  }
+
+  const [consent, setConsent] = useState(true);
   const [retention, setRetention] = useState(true);
   const [title, setTitle] = useState("");
   const [started, setStarted] = useState<number | null>(null);
@@ -223,20 +285,149 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
             <summary><Headphones size={18} /><span>{active ? "Interview audio" : "Interview setup"}</span><ChevronDown size={17} /></summary>
             <div className="panel-heading"><h2>{active ? "Your connection" : "Before you go live"}</h2><Headphones size={18} /></div>
             {!active ? <>
-              <ol className="setup-steps" aria-label="Three steps to start"><li className={mode ? "done" : ""}><span>1</span> Choose audio</li><li className={consent ? "done" : ""}><span>2</span> Confirm permission</li><li><span>3</span> Start</li></ol>
-              <fieldset className="audio-fieldset"><legend>Choose your audio</legend>
-                {tabCaptureAvailable && <label className={`audio-option ${mode === "tab" ? "selected" : ""}`}><input type="radio" name="audio-mode" value="tab" checked={mode === "tab"} onChange={() => setMode("tab")} /><MonitorUp size={20} /><span><strong>Browser tab + microphone</strong><small>Interviewer and you, separately</small></span>{mode === "tab" && <Check size={15} />}</label>}
-                <label className={`audio-option ${mode === "microphone" ? "selected" : ""}`}><input type="radio" name="audio-mode" value="microphone" checked={mode === "microphone"} onChange={() => setMode("microphone")} /><Mic size={20} /><span><strong>Microphone only</strong><small>Use your device microphone</small></span>{mode === "microphone" && <Check size={15} />}</label>
-              </fieldset>
-              <div className="capture-guidance">{mode === "tab" ? <><MonitorUp size={17} /><p>Select your interview tab and enable <strong>Share tab audio</strong>. Keep that tab open.</p></> : <><Mic size={17} /><p>Your microphone needs to hear the interviewer. Headphones may prevent this.</p></>}</div>
-              <div className="consent-box"><ShieldCheck size={19} /><p>Before you start</p><label className="checkbox-label"><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /><span>All participants agree to AI assistance, and the interview rules allow it.</span></label></div>
-              <Button className="wide" disabled={!consent || health?.ai_configured !== true || !minutesAvailable} onClick={start}><Radio size={18} /> Start live interview <ArrowIcon /></Button><p className="audio-privacy">{health === null ? "Checking the interview service…" : "The app does not save audio recordings. You can stop at any time."}</p>
-              <div className="setup-fine-tune"><p className="setup-fine-tune-title">Fine-tune (optional)</p>
-                <details className="capture-advanced"><summary>Audio options &amp; interview name</summary><label className="standalone-label">Interview name <span className="muted">(optional)</span><input value={title} onChange={event => setTitle(event.target.value)} maxLength={200} placeholder="e.g. Frontend developer interview" /></label>
-                  {browserWorkspace && <label className="voice-recognition-field"><span>Speech recognition</span><select value={microphoneEngine} onChange={event => setMicrophoneEngine(event.target.value)}><option value="streaming">Live recognition · recommended</option><option value="enhanced">Short recordings · backup</option><option value="standard">Browser recognition</option></select><small className="muted">Try a backup if live recognition cannot connect. Audio is sent to the selected transcription service while listening.</small></label>}
-                  <p className="muted small">Keep this page open during the interview. On mobile, switching apps or locking your screen may interrupt audio. Shared-tab audio works only in compatible desktop browsers.</p>
-                </details>
-                <label className="checkbox-label retention-label"><input type="checkbox" checked={retention} onChange={event => setRetention(event.target.checked)} /><span><strong>Save interview text</strong><small>Keep questions and answers in Past interviews.</small></span></label>
+              <div className="pre-interview-container">
+                {/* 1. Job Role Selection */}
+                <div className="setup-box">
+                  <div className="setup-box-header">
+                    <div className="setup-box-title">
+                      <Briefcase size={16} />
+                      <strong>Target Job Role</strong>
+                    </div>
+                    <span className="role-badge">{selectedRole}</span>
+                  </div>
+                  <p className="setup-box-sub">Select your interview role to tailor AI terminology and answers.</p>
+                  <div className="role-chip-group">
+                    {ROLE_PRESETS.map(preset => {
+                      const isSelected = !isCustomRole && selectedRole.toLowerCase() === preset.label.toLowerCase();
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          className={`role-chip ${isSelected ? "selected" : ""}`}
+                          onClick={() => handleRoleChange(preset.label)}
+                        >
+                          {isSelected && <Check size={12} className="role-check" />}
+                          {preset.label}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      className={`role-chip ${isCustomRole ? "selected" : ""}`}
+                      onClick={() => setIsCustomRole(true)}
+                    >
+                      ✏️ Other Role…
+                    </button>
+                  </div>
+                  {isCustomRole && (
+                    <div className="custom-role-input-box">
+                      <input
+                        type="text"
+                        value={customRoleText}
+                        onChange={e => setCustomRoleText(e.target.value)}
+                        onBlur={handleCustomRoleSubmit}
+                        onKeyDown={e => { if (e.key === "Enter") handleCustomRoleSubmit(); }}
+                        placeholder="Enter your target role (e.g. Data Scientist, DevOps)…"
+                        className="custom-role-field"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCustomRoleSubmit}
+                        className="custom-role-apply-btn"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Optional Resume Upload */}
+                <div className="setup-box">
+                  <div className="setup-box-header">
+                    <div className="setup-box-title">
+                      <FileText size={16} />
+                      <strong>Upload Resume</strong>
+                    </div>
+                    <span className="optional-badge">Optional</span>
+                  </div>
+                  <p className="setup-box-sub">Ground AI suggestions in your actual projects &amp; work experience.</p>
+                  {activeResume ? (
+                    <div className="resume-ready-card">
+                      <div className="resume-ready-left">
+                        <CheckCircle2 size={18} className="resume-ready-icon" />
+                        <div>
+                          <strong>{activeResume.name}</strong>
+                          <small>Attached · Ready to ground live answers</small>
+                        </div>
+                      </div>
+                      <label className="resume-replace-btn">
+                        Change
+                        <input type="file" accept=".pdf,.docx,.txt,.md" className="sr-only" onChange={handleResumeUpload} disabled={isUploadingResume} />
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="resume-dropzone-container">
+                      <label className={`resume-drop-label ${isUploadingResume ? "is-uploading" : ""}`}>
+                        <input type="file" accept=".pdf,.docx,.txt,.md" className="sr-only" onChange={handleResumeUpload} disabled={isUploadingResume} />
+                        {isUploadingResume ? (
+                          <div className="resume-uploading-msg">
+                            <Loader2 size={16} className="animate-spin" />
+                            <span>Uploading &amp; extracting resume text…</span>
+                          </div>
+                        ) : (
+                          <div className="resume-drop-content">
+                            <UploadCloud size={20} className="resume-cloud-icon" />
+                            <div className="resume-drop-text">
+                              <strong>Upload Resume (PDF, DOCX, TXT)</strong>
+                              <small>Click to browse · Optional: you can start without one</small>
+                            </div>
+                          </div>
+                        )}
+                      </label>
+                      {resumeUploadError && <p className="resume-error-note">{resumeUploadError}</p>}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Audio & 1-Click Start CTA */}
+                <div className="setup-action-box">
+                  {tabCaptureAvailable && (
+                    <div className="audio-mode-pills">
+                      <button
+                        type="button"
+                        className={`audio-mode-pill ${mode === "microphone" ? "active" : ""}`}
+                        onClick={() => setMode("microphone")}
+                      >
+                        <Mic size={14} /> Microphone
+                      </button>
+                      <button
+                        type="button"
+                        className={`audio-mode-pill ${mode === "tab" ? "active" : ""}`}
+                        onClick={() => setMode("tab")}
+                      >
+                        <MonitorUp size={14} /> Tab Audio + Mic
+                      </button>
+                    </div>
+                  )}
+                  <label className="consent-agreement-label">
+                    <input
+                      type="checkbox"
+                      checked={consent}
+                      onChange={event => setConsent(event.target.checked)}
+                    />
+                    <span>All participants agree to AI assistance and interview rules allow it.</span>
+                  </label>
+                  <Button
+                    className="wide start-interview-main-btn"
+                    disabled={!consent || health?.ai_configured === false || !minutesAvailable}
+                    onClick={start}
+                  >
+                    <Radio size={18} /> Start live interview <ArrowIcon />
+                  </Button>
+                  <p className="start-guarantee-note">
+                    {health === null ? "Checking interview service…" : "Audio is transcribed live in real-time and never saved. Stop anytime."}
+                  </p>
+                </div>
               </div>
             </> : <>
               <div className="live-clock"><span className={state.phase === "listening" ? "recording-dot" : "waiting-dot"} />{time}<span>SESSION TIME</span></div>

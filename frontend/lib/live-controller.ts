@@ -217,6 +217,11 @@ export class LiveController {
       ticket = result.ticket;
     } catch (error) {
       if (this.stopped || request.signal.aborted) return;
+      if (error instanceof ApiError && error.status === 404 && typeof window !== "undefined" && (window.location.hostname.includes("vercel.app") || window.location.hostname.includes("interviewwin.live"))) {
+        this.browserMode = true;
+        this.startBrowserLiveMode();
+        return;
+      }
       if (error instanceof ApiError && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status)) {
         const detail = error.status === 409 ? "This session has ended. Audio capture stopped. Start a new session to continue."
           : error.status === 401 ? "Your sign-in has expired. Audio capture stopped. Sign in again and start a new session."
@@ -318,6 +323,12 @@ export class LiveController {
   private scheduleReconnect(): void {
     if (this.stopped || this.reconnectTimer) return;
     this.latestQuestion = null; this.heldAnswer = null;
+    if (this.reconnects >= 1 && typeof window !== "undefined" && (window.location.hostname.includes("vercel.app") || window.location.hostname.includes("interviewwin.live"))) {
+      this.releaseSocket();
+      this.browserMode = true;
+      this.startBrowserLiveMode();
+      return;
+    }
     if (this.reconnects >= MAX_RECONNECTS) { void this.fail("The live service is unavailable after several reconnect attempts. Your capture has stopped."); return; }
     const delay = Math.min(750 * 2 ** this.reconnects++, 8000);
     this.notify({ type: "local", phase: "reconnecting", detail: "Connection interrupted. Reconnecting automatically; audio during the interruption is discarded." });
@@ -796,8 +807,14 @@ export class LiveController {
     this.answeringQuestion = true;
     let evidence: Evidence[] = [];
     let user: User | null = null;
-    try { evidence = searchStoredEvidence(focusText); user = getStoredUser(); }
-    catch (error) { this.notify({ type: "local", error: messageOf(error) }); }
+    try {
+      evidence = searchStoredEvidence(focusText);
+      user = getStoredUser();
+      if (!evidence.length) {
+        const remote = await api<Evidence[]>(`/knowledge/search?q=${encodeURIComponent(focusText)}`).catch(() => []);
+        if (remote && remote.length) evidence = remote;
+      }
+    } catch (error) { this.notify({ type: "local", error: messageOf(error) }); }
     const preferences = this.currentPreferences || user?.preferences;
     const timeout = setTimeout(() => request.abort(), 25000);
     try {
@@ -872,6 +889,12 @@ export class LiveController {
       this.notify({ type: "metrics", questions: this.interviewMemory.context().answered_count, reconnects: 0, audio_dropped: 0, first_token_ms: firstTokenMs ?? Date.now() - startedAt, total_ms: Date.now() - startedAt });
       addTurnToStoredSession(this.session.id, { id: genId, role: "interviewer", text: questionText, question: resolvedQuestion,
         answer, evidence: usedEvidence, created_at: new Date().toISOString() });
+      if (this.session.id.startsWith("sess_")) {
+        void api(`/sessions/${encodeURIComponent(this.session.id)}/turn`, post({
+          id: genId, role: "interviewer", text: questionText, question: resolvedQuestion,
+          answer, evidence: usedEvidence, created_at: new Date().toISOString(), latency_ms: Date.now() - startedAt
+        })).catch(() => {});
+      }
     } catch (error) {
       if (this.stopped || requestSequence < this.latestAnsweredSequence) return;
       this.deliver({ type: "answer_cancelled", generation_id: genId });
