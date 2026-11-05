@@ -827,7 +827,10 @@ export class LiveController {
       evidence = searchStoredEvidence(focusText);
       user = getStoredUser();
       if (!evidence.length) {
-        const remote = await api<Evidence[]>(`/knowledge/search?q=${encodeURIComponent(focusText)}`).catch(() => []);
+        const remote = await Promise.race([
+          api<Evidence[]>(`/knowledge/search?q=${encodeURIComponent(focusText)}`).catch(() => []),
+          new Promise<Evidence[]>(r => setTimeout(() => r([]), 350))
+        ]);
         if (remote && remote.length) evidence = remote;
       }
     } catch (error) { this.notify({ type: "local", error: messageOf(error) }); }
@@ -905,7 +908,7 @@ export class LiveController {
       this.notify({ type: "metrics", questions: this.interviewMemory.context().answered_count, reconnects: 0, audio_dropped: 0, first_token_ms: firstTokenMs ?? Date.now() - startedAt, total_ms: Date.now() - startedAt });
       addTurnToStoredSession(this.session.id, { id: genId, role: "interviewer", text: questionText, question: resolvedQuestion,
         answer, evidence: usedEvidence, created_at: new Date().toISOString() });
-      if (this.session.id.startsWith("sess_")) {
+      if (this.session.id && !this.session.id.startsWith("local_")) {
         void api(`/sessions/${encodeURIComponent(this.session.id)}/turn`, post({
           id: genId, role: "interviewer", text: questionText, question: resolvedQuestion,
           answer, evidence: usedEvidence, created_at: new Date().toISOString(), latency_ms: Date.now() - startedAt

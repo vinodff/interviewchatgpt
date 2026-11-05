@@ -80,14 +80,23 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
     setIsUploadingResume(true);
     setResumeUploadError("");
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const newSource = await api<Source>("/sources/upload", { method: "POST", body: formData });
-      setActiveResume(newSource);
+      let localSource: Source | null = null;
       try {
         const { uploadStoredSource } = await import("@/lib/browser-storage");
-        await uploadStoredSource(file, null);
-      } catch { /* browser storage fallback */ }
+        localSource = await uploadStoredSource(file, null);
+        if (localSource) setActiveResume(localSource);
+      } catch (err) {
+        console.warn("Local storage parse warning:", err);
+      }
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const newSource = await api<Source>("/sources/upload", { method: "POST", body: formData });
+        if (newSource) setActiveResume(newSource);
+      } catch (remoteErr) {
+        if (!localSource) throw remoteErr;
+      }
     } catch (err) {
       setResumeUploadError(messageOf(err));
     } finally {

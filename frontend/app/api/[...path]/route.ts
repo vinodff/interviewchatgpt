@@ -226,7 +226,7 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
     }
     const cleaned = extractedText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFFFD]/g, " ").trim();
     const chunks = chunkText(cleaned, 800, 100);
-    const sourceId = "src_" + crypto.randomUUID();
+    const sourceId = crypto.randomUUID();
     const kind = ext === "pdf" ? "pdf" : ext === "docx" ? "docx" : "document";
     const newSource = {
       id: sourceId,
@@ -245,10 +245,14 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
       analysis: {},
       created_at: new Date().toISOString()
     };
-    await serverSupabase.from("sources").insert(newSource);
+    const { error: srcErr } = await serverSupabase.from("sources").insert(newSource);
+    if (srcErr) {
+      console.error("Sources insert error:", srcErr);
+      return json({ detail: srcErr.message || "Could not save source." }, 500);
+    }
     if (chunks.length > 0) {
       const chunkRows = chunks.map((chunk, i) => ({
-        id: `chk_${sourceId}_${i}`,
+        id: crypto.randomUUID(),
         user_id: auth.authId,
         source_id: sourceId,
         project_id: projectId,
@@ -313,7 +317,7 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
       let body: Record<string, unknown> = {};
       try { body = await request.json(); } catch { /* ignore */ }
       const newSession = {
-        id: "sess_" + crypto.randomUUID(),
+        id: crypto.randomUUID(),
         user_id: auth.authId,
         title: typeof body?.title === "string" && body.title.trim() ? body.title.trim() : "Live conversation",
         status: "created",
@@ -389,7 +393,7 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
     let body: Record<string, unknown> = {};
     try { body = await request.json(); } catch { /* ignore */ }
     const turnRow = {
-      id: typeof body.id === "string" ? body.id : "turn_" + crypto.randomUUID(),
+      id: typeof body.id === "string" && body.id.length <= 36 ? body.id : crypto.randomUUID(),
       session_id: sessionId,
       role: typeof body.role === "string" ? body.role : "unknown",
       text: typeof body.text === "string" ? body.text : "",

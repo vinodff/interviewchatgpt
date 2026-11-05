@@ -76,7 +76,8 @@ export async function generateAnswerWithGemini(
     temperature: isCode ? 0.2 : 0.7
   };
 
-  const preferredModel = process.env.GEMINI_ANSWER_MODEL || (audio ? process.env.GEMINI_AUDIO_ANSWER_MODEL || "gemini-3.1-flash-lite" : isCode ? "gemini-3.8-flash" : process.env.GEMINI_FAST_MODEL || "gemini-3.6-flash");
+  const fastDefault = process.env.NODE_ENV === "production" ? "gemini-3.1-flash-lite" : "gemini-3.6-flash";
+  const preferredModel = process.env.GEMINI_ANSWER_MODEL || (audio ? process.env.GEMINI_AUDIO_ANSWER_MODEL || "gemini-3.1-flash-lite" : isCode ? "gemini-3.8-flash" : process.env.GEMINI_FAST_MODEL || fastDefault);
   const models = [...new Set([preferredModel, ...(audio ? ["gemini-3.6-flash", "gemini-3.8-flash"] : ["gemini-3.8-flash", "gemini-3.6-flash"])])].slice(0, 2);
   const systemInstruction = `You assist an authorized live interview. Return the required JSON.
 Decide if latest_speech contains a request: questions embedded after filler or narration, imperatives, and contextual follow-ups count. A speaker label or first-person word must NEVER suppress a real request. Resolve the latest question using recent spoken turns and previous questions, answers, and code; keep its constraints. Do not repeat old unrelated questions.
