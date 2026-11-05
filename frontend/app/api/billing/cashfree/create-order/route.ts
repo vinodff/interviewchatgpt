@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
         customer_email: userEmail,
         customer_phone: userPhone,
       },
-      order_note: `InterviewPilot ${planInfo.name} Plan (${planInfo.minutes} live minutes)`,
+      order_note: `InterviewWin ${planInfo.name} Plan (${planInfo.minutes} live minutes)`,
       order_meta: {
         return_url: returnUrl,
         notify_url: "",
