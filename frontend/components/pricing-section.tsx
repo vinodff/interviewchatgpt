@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Check, Clock, Crown, ShieldCheck, Zap } from "lucide-react";
 import { loadPlans } from "@/lib/server-plans";
-import { PLAN_DETAILS } from "@/lib/plan-details";
+import { PLAN_DETAILS, getFeatureTagClass } from "@/lib/plan-details";
 
 export async function PricingSection({ full = false }: { full?: boolean }) {
   const catalog = await loadPlans();
@@ -26,28 +26,35 @@ export async function PricingSection({ full = false }: { full?: boolean }) {
           const isPopular = plan.id === "pro";
           const isValue = plan.id === "value";
           const isStarter = plan.id === "starter";
+          const isFree = plan.id === "free";
 
-          const checkoutHref =
-            plan.id === "free"
-              ? "/interview?view=live&signup=1"
-              : `/interview?view=billing&plan=${plan.id}`;
+          const checkoutHref = isFree
+            ? "/interview?view=live&signup=1"
+            : `/interview?view=billing&plan=${plan.id}`;
 
-          const buttonText =
-            plan.id === "free"
-              ? "Start free interview"
-              : isPopular
-              ? "Upgrade to Popular"
-              : isValue
-              ? "Upgrade to Value"
-              : "Get Starter";
+          const buttonText = isFree
+            ? "Start Free Interview"
+            : isPopular
+            ? "Upgrade to Popular"
+            : isValue
+            ? "Upgrade to Value"
+            : "Get Starter";
+
+          const buttonClass = isFree
+            ? "plan-button-free"
+            : isPopular
+            ? "plan-button-popular"
+            : isValue
+            ? "plan-button-value"
+            : "plan-button-starter";
 
           return (
             <article
-              className={`panel account-plan-card ${
+              className={`panel account-plan-card account-plan-${plan.id} ${
                 isPopular ? "account-plan-popular" : ""
               } ${isValue ? "account-plan-value" : ""} ${
                 isStarter ? "account-plan-starter" : ""
-              }`}
+              } ${isFree ? "account-plan-free" : ""}`}
               key={plan.id}
               data-reveal
               data-reveal-delay={index * 60}
@@ -62,50 +69,47 @@ export async function PricingSection({ full = false }: { full?: boolean }) {
                 </div>
               )}
 
-              {/* Card Header */}
-              <div className="plan-header">
-                <div className="plan-name-row">
-                  <h3>{plan.name}</h3>
-                  {isPopular && <Crown size={18} style={{ color: "#d97706" }} />}
+              {/* Top Section with locked heights for perfect horizontal alignment */}
+              <div className="plan-card-body-top">
+                <div className="plan-header">
+                  <div className="plan-name-row">
+                    <h3>{plan.name}</h3>
+                    {isPopular && <Crown size={18} style={{ color: "#d97706" }} />}
+                  </div>
+                  <p className="plan-tagline">{details?.tagline}</p>
                 </div>
-                <p className="plan-tagline">{details?.tagline}</p>
+
+                <div className="account-plan-price-block">
+                  <span className="price-currency">₹</span>
+                  <span className="price-amount">{plan.amount / 100}</span>
+                  <span className="price-period">
+                    {isFree ? " forever" : " / month"}
+                  </span>
+                </div>
+
+                <div className={`plan-minutes-highlight plan-minutes-${plan.id}`}>
+                  <Clock size={15} />
+                  <strong>{plan.minutes} Live Minutes</strong>
+                </div>
+
+                <div className="plan-cta-box">
+                  <Link
+                    href={checkoutHref}
+                    className={`plan-button-main ${buttonClass}`}
+                  >
+                    {!isFree && <Zap size={15} />}
+                    <span>{buttonText}</span>
+                    <ArrowRight size={15} />
+                  </Link>
+                  <small className="plan-tax-note">
+                    {isFree
+                      ? "No credit card required. Instant access."
+                      : "All prices in INR. Inclusive of all taxes."}
+                  </small>
+                </div>
               </div>
 
-              {/* Price Block */}
-              <div className="account-plan-price-block">
-                <span className="price-currency">₹</span>
-                <span className="price-amount">{plan.amount / 100}</span>
-                <span className="price-period">
-                  {plan.id === "free" ? " forever" : " / month"}
-                </span>
-              </div>
-
-              {/* Live Minutes Pill */}
-              <div className="plan-minutes-highlight">
-                <Clock size={16} />
-                <strong>{plan.minutes} Live Minutes</strong>
-              </div>
-
-              {/* Action Button */}
-              <div className="plan-cta-box">
-                <Link
-                  href={checkoutHref}
-                  className={`plan-button-main ${
-                    isPopular ? "plan-button-popular" : ""
-                  }`}
-                >
-                  {plan.id !== "free" && <Zap size={16} />}
-                  <span>{buttonText}</span>
-                  <ArrowRight size={16} />
-                </Link>
-                <small className="plan-tax-note">
-                  {plan.id === "free"
-                    ? "No credit card required for the Free plan."
-                    : "All prices in INR. Inclusive of all taxes."}
-                </small>
-              </div>
-
-              {/* Features List */}
+              {/* Features section begins at the exact same vertical pixel */}
               {details?.features && (
                 <div className="plan-features-section">
                   <div className="plan-features-label">WHAT&apos;S INCLUDED:</div>
@@ -118,12 +122,18 @@ export async function PricingSection({ full = false }: { full?: boolean }) {
                         }
                       >
                         <span className="feature-check-icon">
-                          <Check size={14} />
+                          <Check size={12} strokeWidth={2.5} />
                         </span>
                         <span className="feature-text">
                           {feat.text}
                           {feat.tag && (
-                            <span className="feature-tag-inline">{feat.tag}</span>
+                            <span
+                              className={`feature-tag-inline ${getFeatureTagClass(
+                                feat.tag
+                              )}`}
+                            >
+                              {feat.tag}
+                            </span>
                           )}
                         </span>
                       </li>

@@ -13,9 +13,29 @@ export interface PlanDetail {
   features: PlanFeatureItem[];
 }
 
+export function getFeatureTagClass(tag?: string): string {
+  if (!tag) return "";
+  switch (tag.toLowerCase()) {
+    case "resume":
+      return "feature-tag-blue";
+    case "knowledge":
+      return "feature-tag-amber";
+    case "think":
+      return "feature-tag-purple";
+    case "unlimited":
+      return "feature-tag-emerald";
+    case "never expire":
+      return "feature-tag-rose";
+    default:
+      return "feature-tag-default";
+  }
+}
+
 export const PLAN_DETAILS: Record<PlanId, PlanDetail> = {
   free: {
     tagline: "Free tier to try live AI interview assistance.",
+    badge: "FREE TIER",
+    badgeColor: "#475569",
     features: [
       { text: "2 live interview minutes / month" },
       { text: "1 Resume upload & ATS keyword scanning" },
@@ -44,7 +64,7 @@ export const PLAN_DETAILS: Record<PlanId, PlanDetail> = {
   pro: {
     tagline: "Recommended for active job seekers & complete interview loops.",
     badge: "★ MOST POPULAR",
-    badgeColor: "#15675b",
+    badgeColor: "#0f766e",
     features: [
       { text: "45 live interview minutes (covers 3–4 interview rounds)", highlight: true },
       { text: "Unlimited Knowledge Base & Company Research files", highlight: true, tag: "Unlimited" },
@@ -73,4 +93,3 @@ export const PLAN_DETAILS: Record<PlanId, PlanDetail> = {
     ],
   },
 };
-

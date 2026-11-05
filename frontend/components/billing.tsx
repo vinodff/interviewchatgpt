@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { ApiError, messageOf, post } from "@/lib/api";
 import { parsePlans, type PlanCatalog, type PlanId } from "@/lib/plans";
-import { PLAN_DETAILS } from "@/lib/plan-details";
+import { PLAN_DETAILS, getFeatureTagClass } from "@/lib/plan-details";
 import { useOwnedApi } from "@/lib/use-owned-api";
 import { CashfreeService } from "@/lib/cashfree-service";
 import type { Health, User } from "@/lib/types";
@@ -359,11 +359,20 @@ export function Billing({
           const isPopular = plan.id === "pro";
           const isValue = plan.id === "value";
 
+          const isFree = plan.id === "free";
+          const buttonClass = isPopular
+            ? "plan-button-popular"
+            : isValue
+            ? "plan-button-value"
+            : "plan-button-starter";
+
           return (
             <section
-              className={`panel account-plan-card ${
+              className={`panel account-plan-card account-plan-${plan.id} ${
                 isPopular ? "account-plan-popular" : ""
               } ${isValue ? "account-plan-value" : ""} ${
+                plan.id === "starter" ? "account-plan-starter" : ""
+              } ${isFree ? "account-plan-free" : ""} ${
                 isSelected ? "account-plan-selected" : ""
               } ${isCurrent ? "account-plan-is-current" : ""}`}
               key={plan.id}
@@ -378,56 +387,62 @@ export function Billing({
                 </div>
               )}
 
-              <div className="plan-header">
-                <div className="plan-name-row">
-                  <h3>{plan.name}</h3>
-                  {isPopular && <Crown size={18} style={{ color: "#d97706" }} />}
+              {/* Top Section with locked heights for perfect horizontal alignment */}
+              <div className="plan-card-body-top">
+                <div className="plan-header">
+                  <div className="plan-name-row">
+                    <h3>{plan.name}</h3>
+                    {isPopular && <Crown size={18} style={{ color: "#d97706" }} />}
+                  </div>
+                  <p className="plan-tagline">{details.tagline}</p>
                 </div>
-                <p className="plan-tagline">{details.tagline}</p>
-              </div>
 
-              <div className="account-plan-price-block">
-                <span className="price-currency">₹</span>
-                <span className="price-amount">{plan.amount / 100}</span>
-                <span className="price-period">
-                  {plan.id === "free" ? " forever" : " / month"}
-                </span>
-              </div>
+                <div className="account-plan-price-block">
+                  <span className="price-currency">₹</span>
+                  <span className="price-amount">{plan.amount / 100}</span>
+                  <span className="price-period">
+                    {isFree ? " forever" : " / month"}
+                  </span>
+                </div>
 
-              <div className="plan-minutes-highlight">
-                <Clock size={16} />
-                <strong>{plan.minutes} Live Minutes</strong>
-              </div>
+                <div className={`plan-minutes-highlight plan-minutes-${plan.id}`}>
+                  <Clock size={15} />
+                  <strong>{plan.minutes} Live Minutes</strong>
+                </div>
 
-              {/* Action Button */}
-              <div className="plan-cta-box">
-                {isCurrent ? (
-                  <div className="account-plan-current-tag">
-                    <CheckCircle2 size={16} /> Current active plan
-                  </div>
-                ) : plan.id === "free" ? (
-                  <div className="account-plan-free-included">
-                    Default free tier included
-                  </div>
-                ) : (
-                  <Button
-                    className={`plan-button-main ${
-                      isPopular ? "plan-button-popular" : ""
-                    }`}
-                    busy={busy === plan.id}
-                    disabled={!!busy}
-                    onClick={() => {
-                      if (!phone || phone.length < 10) {
-                        setShowPhoneModal(plan.id);
-                      } else {
-                        void handleCheckout(plan.id, phone);
-                      }
-                    }}
-                  >
-                    <Zap size={16} />
-                    <span>Upgrade to {plan.name}</span>
-                  </Button>
-                )}
+                {/* Action Button */}
+                <div className="plan-cta-box">
+                  {isCurrent ? (
+                    <div className="account-plan-current-tag">
+                      <CheckCircle2 size={16} /> Current active plan
+                    </div>
+                  ) : isFree ? (
+                    <div className="account-plan-free-included">
+                      Default free tier included
+                    </div>
+                  ) : (
+                    <Button
+                      className={`plan-button-main ${buttonClass}`}
+                      busy={busy === plan.id}
+                      disabled={!!busy}
+                      onClick={() => {
+                        if (!phone || phone.length < 10) {
+                          setShowPhoneModal(plan.id);
+                        } else {
+                          void handleCheckout(plan.id, phone);
+                        }
+                      }}
+                    >
+                      <Zap size={15} />
+                      <span>Upgrade to {plan.name}</span>
+                    </Button>
+                  )}
+                  <small className="plan-tax-note">
+                    {isFree
+                      ? "Free forever. Upgrade anytime."
+                      : "All prices in INR. Inclusive of all taxes."}
+                  </small>
+                </div>
               </div>
 
               {/* Feature List */}
@@ -440,12 +455,14 @@ export function Billing({
                       className={feat.highlight ? "feature-item-highlight" : "feature-item"}
                     >
                       <span className="feature-check-icon">
-                        <Check size={14} />
+                        <Check size={12} strokeWidth={2.5} />
                       </span>
                       <span className="feature-text">
                         {feat.text}
                         {feat.tag && (
-                          <span className="feature-tag-inline">{feat.tag}</span>
+                          <span className={`feature-tag-inline ${getFeatureTagClass(feat.tag)}`}>
+                            {feat.tag}
+                          </span>
                         )}
                       </span>
                     </li>
