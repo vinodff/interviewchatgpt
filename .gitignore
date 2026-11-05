@@ -21,3 +21,5 @@ android/**/build/
 android/local.properties
 *.jks
 *.keystore
+
+.vercel/

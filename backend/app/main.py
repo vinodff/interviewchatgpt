@@ -59,7 +59,7 @@ async def security_boundary(request: Request, call_next):
         if settings.local_test_mode:
             if not local_testing_request(request):
                 return JSONResponse({"detail": "Testing access is only available on this device"}, status_code=403)
-            if request.url.path in {"/api/auth/register", "/api/auth/login", "/api/auth/reset-request", "/api/auth/reset-confirm", "/api/billing/checkout", "/api/billing/portal"}:
+            if request.url.path in {"/api/auth/register", "/api/auth/login", "/api/auth/reset-request", "/api/auth/reset-confirm", "/api/auth/supabase-session", "/api/billing/checkout", "/api/billing/portal", "/api/billing/cashfree/create-order"} or request.url.path.startswith("/api/billing/cashfree/verify") or request.url.path.startswith("/api/billing/cashfree/webhook"):
                 return JSONResponse({"detail": "Accounts and billing are disabled in the local testing workspace"}, status_code=403)
         if request.url.path == "/api/sources/upload":
             from fastapi import HTTPException
@@ -74,7 +74,7 @@ async def security_boundary(request: Request, call_next):
             return JSONResponse({"detail": "Invalid request size"}, status_code=400)
         if content_length > settings.max_upload_bytes + 1024 * 1024:
             return JSONResponse({"detail": "Request exceeds the file size limit"}, status_code=413)
-        if request.method in {"POST", "PATCH", "DELETE", "PUT"} and request.url.path != "/api/billing/webhook":
+        if request.method in {"POST", "PATCH", "DELETE", "PUT"} and request.url.path not in {"/api/billing/webhook", "/api/billing/cashfree/webhook"}:
             origin = request.headers.get("origin")
             if request.headers.get("x-interviewpilot") != "1" or (origin and origin not in settings.allowed_origins) or (settings.environment == "production" and not origin):
                 return JSONResponse({"detail": "Request origin could not be verified"}, status_code=403)

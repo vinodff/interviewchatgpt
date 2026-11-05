@@ -113,8 +113,14 @@ export function Billing({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(user.phone || "");
+  const [prevUserPhone, setPrevUserPhone] = useState(user.phone || "");
   const [showPhoneModal, setShowPhoneModal] = useState<PlanId | null>(null);
+
+  if (user.phone && user.phone !== prevUserPhone) {
+    setPrevUserPhone(user.phone);
+    setPhone(user.phone);
+  }
   const [returnStatus] = useState(() =>
     typeof window === "undefined"
       ? ""
@@ -214,7 +220,10 @@ export function Billing({
     if (typeof window === "undefined") return;
     const orderId = new URLSearchParams(window.location.search).get("cf_order_id");
     if (orderId) {
-      void pollCashfreeOrder(orderId);
+      const timer = setTimeout(() => {
+        void pollCashfreeOrder(orderId);
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, []);
 
@@ -307,6 +316,18 @@ export function Billing({
         description="Choose the plan that fits your interview loop. Get instant access to resume uploads, knowledge base context, and real-time AI reasoning."
       />
 
+      <Alert tone="info">
+        <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+          <ShieldCheck size={20} style={{ flexShrink: 0, marginTop: "2px", color: "#15675b" }} />
+          <div>
+            <strong>Secured by Cashfree Payments India</strong>
+            <p style={{ margin: "4px 0 0", fontSize: "13px", lineHeight: "1.6" }}>
+              Pay securely via UPI (Google Pay, PhonePe, Paytm), Debit/Credit Cards, or Net Banking. Instant account activation and invoice delivery upon payment.
+            </p>
+          </div>
+        </div>
+      </Alert>
+
       {error && <Alert>{error}</Alert>}
       {success && (
         <Alert tone="success">
@@ -385,7 +406,7 @@ export function Billing({
         </div>
         <div className="feature-pill">
           <Brain size={16} className="text-teal" />
-          <span>AI "Think" & Deep Reasoning</span>
+          <span>AI &quot;Think&quot; &amp; Deep Reasoning</span>
         </div>
         <div className="feature-pill">
           <Sparkles size={16} className="text-teal" />
@@ -471,22 +492,25 @@ export function Billing({
                     className={`plan-button-main ${
                       isPopular ? "plan-button-popular" : ""
                     }`}
-                    disabled={!plan.checkout_available || !!busy}
                     busy={busy === plan.id}
+                    disabled={!!busy}
                     onClick={() => {
-                      // Prompt for optional phone or checkout directly
-                      setShowPhoneModal(plan.id);
+                      if (!phone || phone.length < 10) {
+                        setShowPhoneModal(plan.id);
+                      } else {
+                        void handleCheckout(plan.id, phone);
+                      }
                     }}
                   >
-                    <span>Choose {plan.name}</span>
-                    <ArrowRight size={16} />
+                    <Zap size={16} />
+                    <span>Upgrade to {plan.name}</span>
                   </Button>
                 )}
               </div>
 
               {/* Feature List */}
               <div className="plan-features-section">
-                <div className="plan-features-label">WHAT'S INCLUDED:</div>
+                <div className="plan-features-label">WHAT&apos;S INCLUDED:</div>
                 <ul className="plan-features-list">
                   {details.features.map((feat, idx) => (
                     <li
@@ -597,7 +621,7 @@ export function Billing({
         <div className="trust-item">
           <Brain size={20} className="text-teal" />
           <div>
-            <strong>AI "Think" Mode & Knowledge Base</strong>
+            <strong>AI &quot;Think&quot; Mode &amp; Knowledge Base</strong>
             <p>Full access to context uploads, resume grounding, and reasoning.</p>
           </div>
         </div>

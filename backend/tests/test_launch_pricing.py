@@ -31,8 +31,8 @@ def test_three_public_plans_show_real_limits_without_credentials(monkeypatch):
 
 def test_starter_has_its_own_allowance(monkeypatch):
     monkeypatch.setattr(settings, "local_test_mode", False)
-    assert minute_limit(SimpleNamespace(id="person", plan="starter")) == settings.starter_minutes
-    assert minute_limit(SimpleNamespace(id="person", plan="pro")) == settings.pro_minutes
+    assert minute_limit(SimpleNamespace(id="person", plan="starter")) == settings.free_minutes + settings.starter_minutes
+    assert minute_limit(SimpleNamespace(id="person", plan="pro")) == settings.free_minutes + settings.pro_minutes
     assert minute_limit(SimpleNamespace(id="person", plan="free")) == settings.free_minutes
 
 

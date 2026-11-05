@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClientSafe, verifySupabaseUser } from "@/lib/supabase-server";
 
 const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID || "";
-const CASHFREE_SECRET = process.env.CASHFREE_SECRET || process.env.CASHFREE_SECRET_KEY || "";
+const CASHFREE_SECRET =
+  process.env.CASHFREE_SECRET ||
+  process.env.CASHFREE_SECRET_KEY ||
+  "";
 const CASHFREE_ENV = (process.env.CASHFREE_ENV || "production").toLowerCase().trim();
 const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || "2023-08-01";
 
@@ -27,8 +30,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Try to get authenticated user, or fall back to payload / anonymous
-    let userId = `usr_${Math.random().toString(36).substring(2, 10)}`;
-    let userEmail = "candidate@interviewwin.com";
+    let userId = (body.customer_id as string) || `usr_${Math.random().toString(36).substring(2, 10)}`;
+    let userEmail = (body.email as string) || "candidate@interviewwin.com";
     let userName = "InterviewWin Candidate";
     let userPhone = "9876543210";
 
@@ -53,8 +56,13 @@ export async function POST(request: NextRequest) {
     const origin =
       request.headers.get("origin") ||
       request.headers.get("x-forwarded-host") ||
-      "https://www.interviewwin.live";
-    const host = origin.startsWith("http") ? origin : `https://${origin}`;
+      "";
+    const isHttps =
+      origin.startsWith("https://") &&
+      !origin.includes("localhost") &&
+      !origin.includes("127.0.0.1") &&
+      !origin.includes("0.0.0.0");
+    const host = isHttps ? origin : "https://www.interviewwin.live";
     const returnUrl = `${host}/interview?view=billing&cf_order_id={order_id}`;
 
     const payload = {
@@ -69,6 +77,7 @@ export async function POST(request: NextRequest) {
       },
       order_note: `InterviewPilot ${planInfo.name} Plan (${planInfo.minutes} live minutes)`,
       order_meta: {
+        return_url: returnUrl,
         notify_url: "",
       },
     };
@@ -105,8 +114,13 @@ export async function POST(request: NextRequest) {
           status: "ACTIVE",
           payment_session_id: data.payment_session_id,
           minutes_granted: planInfo.minutes,
+          phone: userPhone,
           created_at: new Date().toISOString(),
         });
+
+        if (userId && !userId.startsWith("usr_") && userPhone) {
+          await db.from("users").update({ phone: userPhone }).eq("id", userId);
+        }
       }
     } catch {
       // payment_orders table might not exist yet; do not fail checkout
@@ -119,9 +133,10 @@ export async function POST(request: NextRequest) {
       plan: planId,
       environment: CASHFREE_ENV === "production" || CASHFREE_ENV === "prod" ? "production" : "sandbox",
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Cashfree payment gateway is temporarily unreachable.";
     return NextResponse.json(
-      { detail: error.message || "Cashfree payment gateway is temporarily unreachable." },
+      { detail: message },
       { status: 500 }
     );
   }

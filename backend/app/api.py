@@ -42,6 +42,7 @@ from app.security import (
     token_hash,
 )
 from app.storage import delete_private, read_private, write_private
+from app.supabase_auth import verify_supabase_user
 from app.usage import minute_limit, session_dict, used_seconds, user_dict
 
 router = APIRouter()
@@ -102,17 +103,27 @@ async def login(body: Login, request: Request, response: Response, db: AsyncSess
 
 @router.post("/auth/supabase-session")
 async def supabase_session(body: SupabaseSession, request: Request, response: Response, db: AsyncSession = Depends(database)):
+    if settings.local_test_mode:
+        raise HTTPException(403, "Accounts and billing are disabled in the local testing workspace")
     await rate_limit("supabase-session:" + (request.client.host if request.client else "unknown"), 30, 60)
-    email = str(body.email).lower().strip()
-    name = (body.name or "").strip() or email.split("@")[0]
-    user = await db.get(User, body.user_id)
-    if not user:
-        user = await db.scalar(select(User).where(User.email == email))
+    verified = await verify_supabase_user(body.access_token)
+    if body.user_id and body.user_id != verified.id:
+        raise HTTPException(401, "Invalid identity claims")
+    if body.email and str(body.email).lower() != verified.email:
+        raise HTTPException(401, "Invalid identity claims")
+
+    user = await db.get(User, verified.id)
+    if user:
+        if user.email != verified.email:
+            raise HTTPException(409, "User ID belongs to another email")
+    else:
+        user = await db.scalar(select(User).where(User.email == verified.email))
+
     if not user:
         user = User(
-            id=body.user_id,
-            email=email,
-            name=name,
+            id=verified.id,
+            email=verified.email,
+            name=verified.name,
             password_hash="supabase_oauth",
         )
         db.add(user)
@@ -120,12 +131,12 @@ async def supabase_session(body: SupabaseSession, request: Request, response: Re
             await db.commit()
         except IntegrityError:
             await db.rollback()
-            user = await db.scalar(select(User).where(User.email == email))
+            user = await db.scalar(select(User).where(User.email == verified.email))
             if not user:
-                raise HTTPException(500, "Unable to establish user profile")
+                raise HTTPException(500, "Unable to establish user profile") from None
     else:
-        if not user.name and name:
-            user.name = name
+        if not user.name and verified.name:
+            user.name = verified.name
             await db.commit()
 
     old = request.cookies.get(COOKIE)
@@ -151,7 +162,7 @@ async def me(request: Request, response: Response, db: AsyncSession = Depends(da
 
 @router.patch("/profile")
 async def profile(body: ProfileUpdate, user: User = Depends(current_user), db: AsyncSession = Depends(database)):
-    for field in ("name", "github_username"):
+    for field in ("name", "phone", "github_username"):
         value = getattr(body, field)
         if value is not None:
             setattr(user, field, value.strip())

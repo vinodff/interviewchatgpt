@@ -7,8 +7,10 @@ const pages = [
   ["about", "Good work deserves clear words."],
   ["help", "A little help, right here."],
   ["contact", "Let’s find the next step."],
-  ["privacy", "Privacy policy"],
-  ["terms", "Terms of use"],
+  ["privacy", "Privacy Policy"],
+  ["terms", "Terms & Conditions"],
+  ["refund-policy", "Refunds & Cancellations"],
+  ["shipping-policy", "Shipping & Delivery Policy"],
 ] as const;
 
 test("public pages render, have unique metadata and fit mobile and desktop", async ({ page }) => {

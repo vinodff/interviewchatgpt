@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClientSafe } from "@/lib/supabase-server";
 
 const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID || "";
-const CASHFREE_SECRET = process.env.CASHFREE_SECRET || process.env.CASHFREE_SECRET_KEY || "";
+const CASHFREE_SECRET =
+  process.env.CASHFREE_SECRET ||
+  process.env.CASHFREE_SECRET_KEY ||
+  "";
 const CASHFREE_ENV = (process.env.CASHFREE_ENV || "production").toLowerCase().trim();
 const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || "2023-08-01";
 
@@ -67,14 +70,20 @@ export async function GET(
               ? data.customer_details.customer_id.replace("cust_", "")
               : null);
 
+          const customerPhone = data.customer_details?.customer_phone || existingOrder?.phone;
+
           if (existingOrder && existingOrder.status !== "PAID") {
+            const orderUpdates: Record<string, unknown> = {
+              status: "PAID",
+              paid_at: new Date().toISOString(),
+              cf_payment_id: data.cf_payment_id || null,
+            };
+            if (customerPhone && !existingOrder.phone) {
+              orderUpdates.phone = customerPhone;
+            }
             await db
               .from("payment_orders")
-              .update({
-                status: "PAID",
-                paid_at: new Date().toISOString(),
-                cf_payment_id: data.cf_payment_id || null,
-              })
+              .update(orderUpdates)
               .eq("order_id", orderId);
           }
 
@@ -85,21 +94,28 @@ export async function GET(
                 p_amount: minutes,
                 p_plan: plan,
               });
+              if (customerPhone) {
+                await db.from("users").update({ phone: customerPhone }).eq("id", targetUserId);
+              }
             } catch {
               const { data: userRow } = await db
                 .from("users")
-                .select("id, credit_seconds, plan")
+                .select("id, credit_seconds, plan, phone")
                 .eq("id", targetUserId)
                 .maybeSingle();
 
               if (userRow) {
                 const currentSeconds = userRow.credit_seconds || 0;
+                const userUpdates: Record<string, unknown> = {
+                  plan,
+                  credit_seconds: currentSeconds + minutes * 60,
+                };
+                if (customerPhone) {
+                  userUpdates.phone = customerPhone;
+                }
                 await db
                   .from("users")
-                  .update({
-                    plan,
-                    credit_seconds: currentSeconds + minutes * 60,
-                  })
+                  .update(userUpdates)
                   .eq("id", targetUserId);
               }
             }
@@ -123,9 +139,10 @@ export async function GET(
       plan,
       minutes_granted: 0,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Verification check failed.";
     return NextResponse.json(
-      { detail: error.message || "Verification check failed." },
+      { detail: message },
       { status: 500 }
     );
   }

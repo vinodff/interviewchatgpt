@@ -87,7 +87,10 @@ html:has(.site-shell) { scroll-behavior: smooth; scroll-padding-top: 110px; }
 .site-footer { background: #f5f7f0; border-top: 1px solid #dfe6d8; padding-top: 56px; }
 .site-footer-grid { display: grid; grid-template-columns: 1.7fr 1fr 1fr 1fr; gap: 38px; padding-bottom: 44px; }
 .site-footer-brand p { color: #60705f; font-size: 13px; line-height: 1.9; margin: 20px 0 12px; }
-.site-footer-brand > a:last-child { font-size: 12px; overflow-wrap: anywhere; }
+.site-footer-contact { display: flex; flex-direction: column; gap: 6px; }
+.site-footer-contact a { font-size: 12px; color: #42714e; text-decoration: none; overflow-wrap: anywhere; }
+.site-footer-contact a:hover { text-decoration: underline; }
+.site-footer-address { font-size: 11px; color: #6d7f6e; line-height: 1.6; margin-top: 6px; max-width: 340px; }
 .site-footer nav { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .site-footer nav h2 { font-size: 12px; letter-spacing: 0; margin-bottom: 10px; }
 .site-footer nav a { color: #586a5b; font-size: 12px; min-height: 32px; display: flex; align-items: center; }

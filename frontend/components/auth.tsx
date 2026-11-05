@@ -2,7 +2,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ArrowRight, Check, FileText, LockKeyhole, Radio, Sparkles } from "lucide-react";
-import { messageOf } from "@/lib/api";
+import { api, messageOf, post } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { fetchSupabaseMe } from "@/lib/supabase-identity";
 import type { User } from "@/lib/types";
@@ -44,14 +44,13 @@ export function Auth({ onAuthenticated, serviceError }: { onAuthenticated: (user
 
     async function syncSession() {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user && !cancelled) {
-          setBusy(true);
-          // Identity now comes from the Vercel /api/supabase/me route,
-          // which validates the Supabase JWT itself — no caller-supplied
-          // user id or email is trusted.
-          const user = await fetchSupabaseMe();
-          if (!cancelled) onAuthenticated(user);
+        if (supabase) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user && !cancelled) {
+            setBusy(true);
+            const user = await fetchSupabaseMe();
+            if (!cancelled) onAuthenticated(user);
+          }
         }
       } catch (err) {
         if (!cancelled) setError(messageOf(err));
@@ -62,29 +61,40 @@ export function Auth({ onAuthenticated, serviceError }: { onAuthenticated: (user
 
     void syncSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && !cancelled) {
-        setBusy(true);
-        try {
-          const user = await fetchSupabaseMe();
-          if (!cancelled) onAuthenticated(user);
-        } catch (err) {
-          if (!cancelled) setError(messageOf(err));
-        } finally {
-          if (!cancelled) setBusy(false);
+    if (supabase) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && !cancelled) {
+          setBusy(true);
+          try {
+            const user = await fetchSupabaseMe();
+            if (!cancelled) onAuthenticated(user);
+          } catch (err) {
+            if (!cancelled) setError(messageOf(err));
+          } finally {
+            if (!cancelled) setBusy(false);
+          }
         }
-      }
-    });
+      });
+
+      return () => {
+        cancelled = true;
+        subscription.unsubscribe();
+      };
+    }
 
     return () => {
       cancelled = true;
-      subscription.unsubscribe();
     };
   }, [onAuthenticated]);
 
   async function handleGoogleSignIn() {
     setError("");
     setBusy(true);
+    if (!supabase) {
+      setError("Google Sign-In is not configured. Please use email and password.");
+      setBusy(false);
+      return;
+    }
     try {
       const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
       const redirectUrl = isLocal
@@ -119,16 +129,30 @@ export function Auth({ onAuthenticated, serviceError }: { onAuthenticated: (user
     setError("");
     setBusy(true);
     const form = new FormData(event.currentTarget);
+    const email = String(form.get("email") || "").trim();
+    const password = String(form.get("password") || "");
     try {
-      // Email fallback also goes through Supabase Auth directly (no
-      // FastAPI backend), then the same verified /api/supabase/me route.
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: String(form.get("email") || ""),
-        password: String(form.get("password") || ""),
-      });
-      if (signInError) throw signInError;
-      const user = await fetchSupabaseMe();
-      onAuthenticated(user);
+      let authedUser: User | null = null;
+      if (supabase) {
+        try {
+          const { error: signInError } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          });
+          if (!signInError) {
+            authedUser = await fetchSupabaseMe();
+          }
+        } catch {
+          // Fall through to backend login
+        }
+      }
+      if (!authedUser) {
+        authedUser = await api<User>("/auth/login", post({
+          email,
+          password,
+        }));
+      }
+      onAuthenticated(authedUser);
     } catch (err) {
       setError(messageOf(err));
     } finally {

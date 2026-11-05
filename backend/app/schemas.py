@@ -35,6 +35,7 @@ class Preferences(BaseModel):
 
 class ProfileUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    phone: str | None = Field(default=None, max_length=20)
     github_username: str | None = Field(default=None, max_length=39, pattern=r"^[a-zA-Z0-9-]*$")
     preferences: Preferences | None = None
 
@@ -65,7 +66,7 @@ class ResetConfirm(BaseModel):
 
 
 class SupabaseSession(BaseModel):
-    user_id: str = Field(min_length=1, max_length=64)
-    email: EmailStr
+    user_id: str | None = Field(default=None, max_length=64)
+    email: EmailStr | None = None
     name: str = Field(default="", max_length=120)
-    access_token: str = Field(default="", max_length=4096)
+    access_token: str = Field(min_length=1, max_length=4096)

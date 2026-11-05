@@ -1,10 +1,12 @@
 import asyncio
 import json
 import logging
+import re
 import secrets
 import time
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
+from urllib.parse import urlparse
 
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -56,22 +58,45 @@ def configured(plan: str | None = None):
 @router.get("/plans")
 async def plans():
     cashfree_ready = cashfree.is_configured()
-    stripe_ready = bool(settings.stripe_secret_key.get_secret_value() and settings.stripe_webhook_secret.get_secret_value())
-    ready = (cashfree_ready or stripe_ready) and not settings.local_test_mode
-    is_preview = False if cashfree_ready else settings.local_test_mode
-    checkout_ok = ready or cashfree_ready
-    return {"preview": is_preview, "gateway": "cashfree" if cashfree_ready else "stripe", "plans": [
-        {"id": "free", "name": "Free", "minutes": settings.free_minutes, "amount": 0, "currency": "inr", "checkout_available": False},
-        {"id": "starter", "name": "Starter", "minutes": settings.starter_minutes, "amount": settings.starter_price_minor, "currency": "inr", "checkout_available": checkout_ok},
-        {"id": "pro", "name": "Popular", "minutes": settings.pro_minutes, "amount": settings.pro_price_minor, "currency": "inr", "checkout_available": checkout_ok},
-        {"id": "value", "name": "Value", "minutes": settings.value_minutes, "amount": settings.value_price_minor, "currency": "inr", "checkout_available": checkout_ok},
-    ]}
+    stripe_ready = bool(
+        settings.stripe_secret_key.get_secret_value()
+        and settings.stripe_webhook_secret.get_secret_value()
+    )
+    is_preview = settings.local_test_mode
+    if cashfree_ready:
+        gateway = "cashfree"
+        billing_type = "credits"
+        checkout_available = not is_preview
+    else:
+        gateway = "stripe"
+        billing_type = "subscription"
+        checkout_available = stripe_ready and not is_preview
+
+    def plan_checkout(p_id: str) -> bool:
+        if p_id == "free" or not checkout_available:
+            return False
+        if gateway == "stripe":
+            price_id = price_id_for(p_id)
+            return bool(price_id)
+        return True
+
+    return {
+        "preview": is_preview,
+        "gateway": gateway,
+        "billing_type": billing_type,
+        "plans": [
+            {"id": "free", "name": "Free", "minutes": settings.free_minutes, "amount": 0, "currency": "inr", "checkout_available": False},
+            {"id": "starter", "name": "Starter", "minutes": settings.starter_minutes, "amount": settings.starter_price_minor, "currency": "inr", "checkout_available": plan_checkout("starter")},
+            {"id": "pro", "name": "Popular", "minutes": settings.pro_minutes, "amount": settings.pro_price_minor, "currency": "inr", "checkout_available": plan_checkout("pro")},
+            {"id": "value", "name": "Value", "minutes": settings.value_minutes, "amount": settings.value_price_minor, "currency": "inr", "checkout_available": plan_checkout("value")},
+        ],
+    }
 
 
 class CashfreeOrderRequest(BaseModel):
     plan: Literal["starter", "pro", "value"] = "starter"
     return_url: str | None = None
-    phone: str | None = None
+    phone: Any = None
 
 
 @router.post("/cashfree/create-order")
@@ -80,8 +105,31 @@ async def create_cashfree_order_endpoint(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(database),
 ):
+    if settings.local_test_mode:
+        raise HTTPException(403, "Accounts and billing are disabled in the local testing workspace")
+
     if not cashfree.is_configured():
         raise HTTPException(503, "Cashfree payments are not configured. Please set CASHFREE_APP_ID and CASHFREE_SECRET")
+
+    phone = payload.phone
+    if not isinstance(phone, str) or isinstance(phone, bool):
+        raise HTTPException(422, "Please enter a valid 10-digit Indian mobile number")
+    clean_phone = phone.strip().replace(" ", "").replace("-", "")
+    if clean_phone.startswith("+91"):
+        clean_phone = clean_phone[3:]
+    if not re.match(r"^[6-9]\d{9}$", clean_phone):
+        raise HTTPException(422, "Please enter a valid 10-digit Indian mobile number")
+
+    if payload.return_url:
+        try:
+            parsed = urlparse(payload.return_url)
+            if not parsed.scheme or not parsed.netloc or parsed.scheme not in {"http", "https"}:
+                raise ValueError()
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            if origin not in settings.allowed_origins:
+                raise ValueError()
+        except Exception:
+            raise HTTPException(422, "Invalid return URL") from None
 
     await rate_limit("cf-order:" + user.id, 10, 60)
 
@@ -102,7 +150,7 @@ async def create_cashfree_order_endpoint(
             user_id=user.id,
             user_name=user.name,
             user_email=user.email,
-            user_phone=payload.phone,
+            user_phone=clean_phone,
             return_url=payload.return_url or "",
             plan_name=plan_meta["name"],
         )
@@ -121,8 +169,10 @@ async def create_cashfree_order_endpoint(
         status="ACTIVE",
         payment_session_id=cf_order.get("payment_session_id", ""),
         minutes_granted=0,
+        phone=clean_phone,
     )
     db.add(order)
+    user.phone = clean_phone
     await db.commit()
 
     return {
@@ -135,25 +185,38 @@ async def create_cashfree_order_endpoint(
     }
 
 
+async def grant_cashfree_credits(db: AsyncSession, order: PaymentOrder) -> None:
+    minutes_map = {
+        "starter": settings.starter_minutes,
+        "pro": settings.pro_minutes,
+        "value": settings.value_minutes,
+    }
+    granted = minutes_map.get(order.plan_id, settings.starter_minutes)
+    order.status = "PAID"
+    order.paid_at = datetime.now(UTC)
+    order.minutes_granted = granted
+    user = await db.scalar(select(User).where(User.id == order.user_id).with_for_update())
+    if user:
+        user.credit_seconds = (user.credit_seconds or 0) + granted * 60
+        if order.phone and not getattr(user, "phone", None):
+            user.phone = order.phone
+    await db.commit()
+
+
 @router.get("/cashfree/verify/{order_id}")
 async def verify_cashfree_order_endpoint(
     order_id: str,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(database),
 ):
+    if settings.local_test_mode:
+        raise HTTPException(403, "Accounts and billing are disabled in the local testing workspace")
+
     order = await db.scalar(
         select(PaymentOrder).where(PaymentOrder.order_id == order_id, PaymentOrder.user_id == user.id)
     )
     if not order:
         raise HTTPException(404, "Order not found")
-
-    if order.status == "PAID":
-        return {
-            "status": "PAID",
-            "order_id": order.order_id,
-            "plan": order.plan_id,
-            "minutes_granted": order.minutes_granted,
-        }
 
     try:
         cf_data = await cashfree.fetch_cashfree_order(order_id)
@@ -166,27 +229,25 @@ async def verify_cashfree_order_endpoint(
             "minutes_granted": order.minutes_granted,
         }
 
+    cf_amt = cf_data.get("order_amount")
+    if (
+        cf_data.get("order_id") != order.order_id
+        or cf_data.get("order_currency") != "INR"
+        or isinstance(cf_amt, bool)
+        or not isinstance(cf_amt, (int, float))
+        or float(cf_amt) != float(order.amount)
+    ):
+        raise HTTPException(502, "Provider order mismatch")
+
     cf_status = cf_data.get("order_status", "").upper()
     if cf_status == "PAID":
-        minutes_map = {
-            "starter": settings.starter_minutes,
-            "pro": settings.pro_minutes,
-            "value": settings.value_minutes,
-        }
-        granted = minutes_map.get(order.plan_id, settings.starter_minutes)
-        order.status = "PAID"
-        order.paid_at = datetime.now(UTC)
-        order.minutes_granted = granted
-        order.cf_payment_id = str(cf_data.get("cf_order_id", ""))
-
-        db_user = await db.get(User, user.id)
-        if db_user:
-            db_user.plan = order.plan_id
-
-        await db.commit()
+        if order.status != "PAID":
+            order.cf_payment_id = str(cf_data.get("cf_order_id", ""))
+            await grant_cashfree_credits(db, order)
     elif cf_status in {"EXPIRED", "FAILED"}:
-        order.status = cf_status
-        await db.commit()
+        if order.status != "PAID":
+            order.status = cf_status
+            await db.commit()
 
     return {
         "status": order.status,
@@ -198,6 +259,9 @@ async def verify_cashfree_order_endpoint(
 
 @router.post("/cashfree/webhook")
 async def cashfree_webhook(request: Request, db: AsyncSession = Depends(database)):
+    if settings.local_test_mode:
+        raise HTTPException(403, "Accounts and billing are disabled in the local testing workspace")
+
     timestamp = request.headers.get("x-webhook-timestamp", "")
     signature = request.headers.get("x-webhook-signature", "")
     body = await request.body()
@@ -207,37 +271,45 @@ async def cashfree_webhook(request: Request, db: AsyncSession = Depends(database
 
     try:
         payload = json.loads(body.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError()
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise ValueError()
+        order_data = data.get("order")
+        if not isinstance(order_data, dict):
+            raise ValueError()
+        payment_data = data.get("payment")
+        if not isinstance(payment_data, dict):
+            raise ValueError()
     except Exception:
-        raise HTTPException(400, "Invalid JSON payload")
+        raise HTTPException(400, "Invalid JSON payload") from None
 
-    data = payload.get("data", {})
-    order_data = data.get("order", {})
     order_id = order_data.get("order_id")
-    payment_data = data.get("payment", {})
-    payment_status = payment_data.get("payment_status", "")
+    order_amount = order_data.get("order_amount")
+    order_currency = order_data.get("order_currency")
+    payment_status = payment_data.get("payment_status")
 
-    if not order_id:
+    if not isinstance(payment_status, str) or not isinstance(order_id, str):
+        raise HTTPException(400, "Invalid payload structure")
+
+    order = await db.scalar(select(PaymentOrder).where(PaymentOrder.order_id == order_id).with_for_update())
+    if not order:
         return {"ok": True}
 
+    if (
+        order_currency != "INR"
+        or isinstance(order_amount, bool)
+        or not isinstance(order_amount, (int, float))
+        or float(order_amount) != float(order.amount)
+    ):
+        raise HTTPException(400, "Order amount or currency mismatch")
+
     if payment_status == "SUCCESS":
-        order = await db.scalar(select(PaymentOrder).where(PaymentOrder.order_id == order_id).with_for_update())
-        if order and order.status != "PAID":
-            minutes_map = {
-                "starter": settings.starter_minutes,
-                "pro": settings.pro_minutes,
-                "value": settings.value_minutes,
-            }
-            order.status = "PAID"
-            order.paid_at = datetime.now(UTC)
-            order.minutes_granted = minutes_map.get(order.plan_id, settings.starter_minutes)
+        if order.status != "PAID":
             order.cf_payment_id = str(payment_data.get("cf_payment_id", ""))
             order.payment_method = str(payment_data.get("payment_group", ""))
-
-            user = await db.get(User, order.user_id)
-            if user:
-                user.plan = order.plan_id
-
-            await db.commit()
+            await grant_cashfree_credits(db, order)
 
     return {"ok": True}
 

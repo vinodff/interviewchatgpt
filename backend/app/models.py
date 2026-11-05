@@ -33,6 +33,7 @@ class User(Base):
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     cf_customer_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     credit_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -157,6 +158,7 @@ class PaymentOrder(Base):
     currency: Mapped[str] = mapped_column(String(10), default="INR")
     status: Mapped[str] = mapped_column(String(30), default="ACTIVE", index=True)
     payment_session_id: Mapped[str] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     cf_payment_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     payment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
     minutes_granted: Mapped[int] = mapped_column(Integer, default=0)

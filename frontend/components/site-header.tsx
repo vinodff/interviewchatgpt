@@ -24,7 +24,7 @@ export function SiteHeader() {
       <Link className="button button-primary site-open" href="/interview?view=live">Start live interview <ArrowRight size={16} aria-hidden="true" /></Link>
       <details className="site-mobile-menu" ref={menu} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) closeMenu(); }} onKeyDown={event => { if (event.key === "Escape") { closeMenu(); menu.current?.querySelector("summary")?.focus(); } }}>
         <summary aria-label="Site navigation"><Menu className="menu-open-icon" size={22} /><X className="menu-close-icon" size={22} /></summary>
-        <nav aria-label="Mobile navigation">{[...navigation, { href: "/about", label: "About" }, { href: "/contact", label: "Contact" }].map(item => <Link key={item.href} href={item.href} aria-current={pathname === item.href ? "page" : undefined} onClick={closeMenu}>{item.label}<ArrowRight size={16} /></Link>)}</nav>
+        <nav aria-label="Mobile navigation">{[...navigation, { href: "/about", label: "About" }, { href: "/contact", label: "Contact Us" }].map(item => <Link key={item.href} href={item.href} aria-current={pathname === item.href ? "page" : undefined} onClick={closeMenu}>{item.label}<ArrowRight size={16} /></Link>)}</nav>
       </details>
     </div>
   </header>;

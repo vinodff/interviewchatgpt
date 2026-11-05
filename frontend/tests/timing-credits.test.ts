@@ -31,7 +31,7 @@ describe("plan minutes and free trial timing calculation", () => {
       credit_seconds: 0,
     };
 
-    const user = await userShape(mockDb as any, row);
+    const user = await userShape(mockDb as unknown as Parameters<typeof userShape>[0], row);
     expect(user.minute_limit).toBe(2);
     expect(user.minutes_used).toBe(0);
     expect((user.minute_limit as number) - user.minutes_used).toBe(2);
@@ -55,7 +55,7 @@ describe("plan minutes and free trial timing calculation", () => {
       credit_seconds: 0,
     };
 
-    const user = await userShape(mockDb as any, row);
+    const user = await userShape(mockDb as unknown as Parameters<typeof userShape>[0], row);
     expect(user.minute_limit).toBe(2);
     expect(user.minutes_used).toBe(2);
     expect((user.minute_limit as number) - user.minutes_used).toBe(0);
@@ -79,7 +79,7 @@ describe("plan minutes and free trial timing calculation", () => {
       credit_seconds: 1200, // 20 minutes purchased
     };
 
-    const user = await userShape(mockDb as any, row);
+    const user = await userShape(mockDb as unknown as Parameters<typeof userShape>[0], row);
     // Total limit = 2 free + 20 purchased = 22
     expect(user.minute_limit).toBe(22);
     expect(user.minutes_used).toBe(2);
@@ -105,7 +105,7 @@ describe("plan minutes and free trial timing calculation", () => {
       credit_seconds: 2700, // 45 minutes purchased
     };
 
-    const user = await userShape(mockDb as any, row);
+    const user = await userShape(mockDb as unknown as Parameters<typeof userShape>[0], row);
     expect(user.minute_limit).toBe(47);
     expect(user.minutes_used).toBe(2);
     expect((user.minute_limit as number) - user.minutes_used).toBe(45);
@@ -129,7 +129,7 @@ describe("plan minutes and free trial timing calculation", () => {
       credit_seconds: 7200, // 120 minutes purchased
     };
 
-    const user = await userShape(mockDb as any, row);
+    const user = await userShape(mockDb as unknown as Parameters<typeof userShape>[0], row);
     expect(user.minute_limit).toBe(122);
     expect(user.minutes_used).toBe(2);
     expect((user.minute_limit as number) - user.minutes_used).toBe(120);
@@ -153,7 +153,7 @@ describe("plan minutes and free trial timing calculation", () => {
       credit_seconds: 1200, // 20 minutes purchased
     };
 
-    const user = await userShape(mockDb as any, row);
+    const user = await userShape(mockDb as unknown as Parameters<typeof userShape>[0], row);
     expect(user.minute_limit).toBe(22);
     expect(user.minutes_used).toBe(0);
     expect((user.minute_limit as number) - user.minutes_used).toBe(22);

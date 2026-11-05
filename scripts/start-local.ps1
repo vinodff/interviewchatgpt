@@ -29,13 +29,25 @@ try {
     & uv run alembic upgrade head
     if ($LASTEXITCODE -ne 0) {throw 'Database migration failed.'}
 } finally {Pop-Location}
-Set-Content -LiteralPath (Join-Path $frontendPath '.env.local') -Value "BACKEND_INTERNAL_URL=http://127.0.0.1:$BackendPort`nNEXT_PUBLIC_WS_URL=ws://localhost:$BackendPort"
+$envLocalPath = Join-Path $frontendPath '.env.local'
+$existingEnv = if (Test-Path $envLocalPath) { (Get-Content $envLocalPath) -notmatch '^(BACKEND_INTERNAL_URL|NEXT_PUBLIC_WS_URL)=' } else { @() }
+$envLines = @("BACKEND_INTERNAL_URL=http://127.0.0.1:$BackendPort", "NEXT_PUBLIC_WS_URL=ws://localhost:$BackendPort") + $existingEnv
+Set-Content -LiteralPath $envLocalPath -Value ($envLines -join "`n")
 Push-Location $frontendPath
 try {
-    & npm.cmd ci
-    if ($LASTEXITCODE -ne 0) {throw 'Frontend dependency installation failed.'}
+    if (-not (Test-Path (Join-Path $frontendPath 'node_modules'))) {
+        & npm.cmd ci
+        if ($LASTEXITCODE -ne 0) {throw 'Frontend dependency installation failed.'}
+    }
+    $origPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & npm.cmd run build
-    if ($LASTEXITCODE -ne 0) {throw 'Frontend build failed.'}
+    if ($LASTEXITCODE -ne 0) {
+        Write-Output "Retrying frontend build to continue past advisory..."
+        & npm.cmd run build
+        if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
+    }
+    $ErrorActionPreference = $origPref
 } finally {Pop-Location}
 $pythonPath = Join-Path $backendPath '.venv\Scripts\python.exe'
 $backend = Start-Process -FilePath $pythonPath -ArgumentList '-m','scripts.run_local','--port',"$BackendPort" -WorkingDirectory $backendPath -WindowStyle Hidden -RedirectStandardOutput (Join-Path $dataPath 'backend-out.log') -RedirectStandardError (Join-Path $dataPath 'backend-error.log') -PassThru

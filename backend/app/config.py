@@ -3,7 +3,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     local_test_user_id: str = ""
     database_url: str = "sqlite+aiosqlite:///./data/interviewpilot.db"
     redis_url: str = "memory://"
+    coordination_backend: str = "redis"
+    storage_backend: str = "local"
+    supabase_url: str = ""
+    supabase_anon_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("supabase_anon_key", "supabase_publishable_key"),
+    )
+    supabase_service_role_key: SecretStr = SecretStr("")
+    supabase_storage_bucket: str = "interviewpilot-private"
     gemini_api_key: SecretStr = SecretStr("")
     gemini_answer_model: str = "gemini-3.8-flash"
     gemini_fast_model: str = "gemini-3.5-flash-lite"
@@ -85,8 +94,8 @@ class Settings(BaseSettings):
         if self.environment == "production":
             if not self.database_url.startswith("postgresql+asyncpg://"):
                 raise ValueError("Production requires PostgreSQL")
-            if self.redis_url.startswith("memory:") or not self.cookie_secure:
-                raise ValueError("Production requires Redis and secure cookies")
+            if (self.coordination_backend == "redis" and self.redis_url.startswith("memory:")) or self.coordination_backend not in {"redis", "postgres"} or not self.cookie_secure:
+                raise ValueError("Production requires shared Redis or PostgreSQL and secure cookies")
             if not self.encryption_key.get_secret_value() or not self.gemini_api_key.get_secret_value():
                 raise ValueError("Production requires encryption and Gemini secrets")
             if not self.public_url.startswith("https://") or any(not o.startswith("https://") for o in self.allowed_origins):

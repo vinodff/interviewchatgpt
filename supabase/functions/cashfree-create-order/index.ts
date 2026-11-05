@@ -58,7 +58,10 @@ serve(async (req) => {
           customer_phone: phone || "9999999999",
         },
         order_note: `InterviewWin ${plan ? plan.toUpperCase() + " " : ""}Credits`,
-        order_meta: { notify_url: "" },
+        order_meta: {
+          return_url: "https://www.interviewwin.live/interview?view=billing&cf_order_id={order_id}",
+          notify_url: "",
+        },
       }),
     });
 
@@ -69,6 +72,46 @@ serve(async (req) => {
         JSON.stringify({ error: data.message || JSON.stringify(data) }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
+    }
+
+    // Persist record to Supabase payment_orders and users if credentials are present
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    if (supabaseUrl && supabaseServiceKey) {
+      try {
+        const dbHeaders = {
+          "apikey": supabaseServiceKey,
+          "Authorization": `Bearer ${supabaseServiceKey}`,
+          "Content-Type": "application/json",
+          "Prefer": "return=minimal",
+        };
+        const orderRow = {
+          id: crypto.randomUUID(),
+          order_id: orderId,
+          user_id: customerId || "anonymous",
+          plan_id: plan || "starter",
+          amount: amount,
+          currency: "INR",
+          status: "ACTIVE",
+          payment_session_id: data.payment_session_id,
+          phone: phone || null,
+          created_at: new Date().toISOString(),
+        };
+        await fetch(`${supabaseUrl}/rest/v1/payment_orders`, {
+          method: "POST",
+          headers: dbHeaders,
+          body: JSON.stringify(orderRow),
+        });
+        if (customerId && !customerId.startsWith("cust_") && phone) {
+          await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${encodeURIComponent(customerId)}`, {
+            method: "PATCH",
+            headers: dbHeaders,
+            body: JSON.stringify({ phone }),
+          });
+        }
+      } catch {
+        // Non-blocking database record
+      }
     }
 
     return new Response(

@@ -14,19 +14,25 @@ def month_key() -> str:
     return datetime.now(UTC).strftime("%Y-%m")
 
 
-def minute_limit(user: User) -> int | None:
-    if settings.testing_user(user.id):
-        return None
-    free = settings.free_minutes
-    credit_mins = getattr(user, "credit_seconds", 0) // 60
-    base_plan = {
+def base_allowance_minutes(plan: str) -> int:
+    plan_extra = {
         "free": 0,
         "starter": settings.starter_minutes,
         "pro": settings.pro_minutes,
         "value": settings.value_minutes,
-    }.get(user.plan, 0)
-    purchased = max(credit_mins, base_plan)
-    return free + purchased
+    }.get(plan, 0)
+    return settings.free_minutes + plan_extra
+
+
+def minute_limit(user: User) -> int | float | None:
+    if settings.testing_user(user.id):
+        return None
+    base_mins = base_allowance_minutes(user.plan)
+    credit_sec = getattr(user, "credit_seconds", 0) or 0
+    if credit_sec <= 0:
+        return base_mins
+    total = base_mins + credit_sec / 60
+    return int(total) if isinstance(total, float) and total.is_integer() else total
 
 
 async def used_seconds(db: AsyncSession, user_id: str) -> int:
@@ -37,28 +43,55 @@ async def used_seconds(db: AsyncSession, user_id: str) -> int:
 async def user_dict(db: AsyncSession, user: User) -> dict:
     used = round((await used_seconds(db, user.id)) / 60, 2)
     limit = minute_limit(user)
-    credit_mins = getattr(user, "credit_seconds", 0) // 60
-    return {"id": user.id, "email": user.email, "name": user.name, "plan": user.plan,
-            "github_username": user.github_username, "profile": user.profile, "preferences": user.preferences,
-            "github_verified": bool(user.github_verified_id), "github_verified_username": user.github_verified_username,
-            "minutes_used": used, "minute_limit": limit,
-            "monthly_minute_limit": settings.free_minutes,
-            "credit_minutes_remaining": max(0, round(limit - used, 2)) if limit is not None else None,
-            "testing_mode": settings.testing_user(user.id),
-            "billing_account": bool(user.stripe_customer_id or user.cf_customer_id or credit_mins > 0)}
+    credit_sec = getattr(user, "credit_seconds", 0) or 0
+    plan_base = base_allowance_minutes(user.plan)
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "plan": user.plan,
+        "github_username": user.github_username,
+        "profile": user.profile,
+        "preferences": user.preferences,
+        "phone": getattr(user, "phone", None),
+        "github_verified": bool(user.github_verified_id),
+        "github_verified_username": user.github_verified_username,
+        "minutes_used": used,
+        "minute_limit": limit,
+        "monthly_minute_limit": plan_base,
+        "credit_minutes_remaining": max(0, round(credit_sec / 60, 2)) if limit is not None else None,
+        "testing_mode": settings.testing_user(user.id),
+        "billing_account": bool(user.stripe_customer_id or user.cf_customer_id or credit_sec > 0),
+    }
 
 
 async def charge(db: AsyncSession, user_id: str, session_id: str, seconds: int) -> int:
-    """Charge connected time atomically, never charging more than the user's allowance."""
+    """Charge connected time atomically, first consuming monthly base plan, then purchased credits."""
     user = await db.scalar(select(User).where(User.id == user_id).with_for_update())
     if not user:
         return 0
     builder = pg_insert if db.bind.dialect.name == "postgresql" else sqlite_insert
     await db.execute(builder(UsageBucket).values(user_id=user_id, month=month_key(), seconds=0).on_conflict_do_nothing())
     bucket = await db.scalar(select(UsageBucket).where(UsageBucket.user_id == user_id, UsageBucket.month == month_key()).with_for_update())
-    limit = minute_limit(user)
-    accepted = max(0, seconds) if limit is None else min(max(0, seconds), max(0, limit * 60 - bucket.seconds))
-    await db.execute(update(UsageBucket).where(UsageBucket.user_id == user_id, UsageBucket.month == month_key()).values(seconds=UsageBucket.seconds + accepted))
+
+    if settings.testing_user(user.id):
+        accepted = max(0, seconds)
+        bucket.seconds += accepted
+        await db.execute(update(LiveSession).where(LiveSession.id == session_id, LiveSession.user_id == user_id).values(billed_seconds=LiveSession.billed_seconds + accepted))
+        await db.commit()
+        return accepted
+
+    base_secs = base_allowance_minutes(user.plan) * 60
+    remaining_base = max(0, base_secs - bucket.seconds)
+    to_bucket = min(max(0, seconds), remaining_base)
+    remaining_request = max(0, seconds) - to_bucket
+    credit_secs = getattr(user, "credit_seconds", 0) or 0
+    to_credits = min(remaining_request, max(0, credit_secs))
+    accepted = to_bucket + to_credits
+
+    bucket.seconds += to_bucket
+    if to_credits > 0:
+        user.credit_seconds = max(0, credit_secs - to_credits)
     await db.execute(update(LiveSession).where(LiveSession.id == session_id, LiveSession.user_id == user_id).values(billed_seconds=LiveSession.billed_seconds + accepted))
     await db.commit()
     return accepted
@@ -77,12 +110,30 @@ async def charge_connection(db: AsyncSession, user_id: str, session_id: str, con
         raise ValueError("Usage connection does not belong to this session")
     target = max(connection.charged_seconds, total_seconds)
     delta = target - connection.charged_seconds
+
     await db.execute(builder(UsageBucket).values(user_id=user_id, month=month_key(), seconds=0).on_conflict_do_nothing())
     bucket = await db.get(UsageBucket, (user_id, month_key()), with_for_update=True)
-    limit = minute_limit(user)
-    accepted = delta if limit is None else min(delta, max(0, limit * 60 - bucket.seconds))
-    connection.charged_seconds = target
-    bucket.seconds += accepted
+
+    if settings.testing_user(user.id):
+        accepted = delta
+        connection.charged_seconds = target
+        bucket.seconds += accepted
+        live.billed_seconds += accepted
+        await db.commit()
+        return accepted
+
+    base_secs = base_allowance_minutes(user.plan) * 60
+    remaining_base = max(0, base_secs - bucket.seconds)
+    to_bucket = min(delta, remaining_base)
+    remaining_request = delta - to_bucket
+    credit_secs = getattr(user, "credit_seconds", 0) or 0
+    to_credits = min(remaining_request, max(0, credit_secs))
+    accepted = to_bucket + to_credits
+
+    connection.charged_seconds += accepted
+    bucket.seconds += to_bucket
+    if to_credits > 0:
+        user.credit_seconds = max(0, credit_secs - to_credits)
     live.billed_seconds += accepted
     await db.commit()
     return accepted

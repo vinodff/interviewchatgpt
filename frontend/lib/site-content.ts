@@ -1,14 +1,27 @@
 export const supportEmail = "vcontenthelper@gmail.com";
+export const supportPhone = "+91 80192 38515";
+export const businessName = "InterviewWin Live";
+export const businessAddress = "1-264, Laku Peta, Sakhinetipalli Laku, Sakhinetipalli, VTC: Sakhinetipalle, District: East Godavari, State: Andhra Pradesh, PIN Code: 533251, India";
+export const businessAddressLines = [
+  "1-264, Laku Peta, Sakhinetipalli Laku",
+  "Sakhinetipalli, VTC: Sakhinetipalle",
+  "District: East Godavari, State: Andhra Pradesh",
+  "PIN Code: 533251, India",
+] as const;
+export const businessHours = "Monday – Saturday, 9:00 AM – 6:00 PM IST";
+export const refundTurnaround = "5 to 7 working days";
 
 export const sitePages = {
   features: { title: "Features", description: "Explore source-grounded answers, readable talking points, and an interview assistant built around your experience." },
   "how-it-works": { title: "How it works", description: "From your first source to a consent-based live conversation: get started with InterviewWin." },
-  plans: { title: "Pricing", description: "Compare Free, Starter, and Pro plans for live interview assistance, with clear monthly prices and minute limits." },
+  plans: { title: "Pricing & Plans (INR)", description: "Compare Free, Starter, and Pro plans for live interview assistance, with transparent INR pricing and instant digital delivery." },
   about: { title: "About", description: "Why we’re building a calmer, more thoughtful way to bring your experience into a conversation." },
   help: { title: "Help center", description: "Find answers about getting started, microphone permissions, sources, and your data." },
-  contact: { title: "Contact", description: "Get help with InterviewWin or share feedback with the team." },
-  privacy: { title: "Privacy policy", description: "Understand how InterviewWin handles your sources, audio, session text, and account information." },
-  terms: { title: "Terms of use", description: "Read the conditions for responsible use of InterviewWin Live." },
+  contact: { title: "Contact Us", description: "Get help with InterviewWin, locate our registered office, or speak with our team." },
+  privacy: { title: "Privacy Policy", description: "Understand how InterviewWin handles your sources, audio, session text, and account information." },
+  terms: { title: "Terms & Conditions", description: "Read the conditions and terms for responsible use of InterviewWin Live." },
+  "refund-policy": { title: "Refunds & Cancellations", description: "Review our transparent cancellation terms, refund eligibility, and 5-to-7 day refund turnaround." },
+  "shipping-policy": { title: "Shipping & Delivery Policy", description: "Learn how InterviewWin delivers digital SaaS software and live minute credits instantly online." },
 } as const;
 
 export type SitePage = keyof typeof sitePages;

@@ -1,0 +1,16 @@
+.git
+**/.env
+**/.env.*
+**/.venv
+**/node_modules
+**/.next
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/test-results
+**/playwright-report
+**/*.tsbuildinfo
+data
+artifacts
+android
+docs

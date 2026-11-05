@@ -1,5 +1,6 @@
 export type User = {
   id: string; email: string; name: string; plan: string; github_username: string;
+  phone?: string | null;
   profile: Record<string, unknown>; preferences?: Preferences; minutes_used: number; minute_limit: number | null; testing_mode?: boolean;
   github_verified?: boolean; github_verified_username?: string;
   billing_account?: boolean;

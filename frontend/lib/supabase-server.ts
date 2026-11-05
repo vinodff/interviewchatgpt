@@ -78,6 +78,7 @@ export async function verifySupabaseUser(request: Request): Promise<VerifiedAuth
 
 export type UserRow = {
   id: string; email: string; name: string; plan: string; github_username: string;
+  phone?: string | null;
   github_verified_id: number | null; github_verified_username: string;
   profile: Record<string, unknown>; preferences: Record<string, unknown>;
   stripe_customer_id: string | null; cf_customer_id: string | null;
@@ -118,6 +119,7 @@ export async function userShape(db: SupabaseClient, row: UserRow): Promise<User>
 
   return {
     id: row.id, email: row.email, name: row.name, plan,
+    phone: row.phone || null,
     github_username: row.github_username || "",
     profile: row.profile || {}, preferences: row.preferences || {},
     github_verified: Boolean(row.github_verified_id),

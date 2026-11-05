@@ -5,6 +5,7 @@ import { isBrowserWorkspace } from "@/lib/workspace-mode";
 import { sanitizeInterviewContext } from "@/lib/interview-memory";
 import { transcribeMicrophone, validMicrophoneWav } from "@/lib/server-transcription";
 import { createSpeechTicket } from "@/lib/server-streaming-speech";
+import { clearSessionCookie, formatUserResponse, getAuthenticatedUser, getServerSupabase, setSessionCookie } from "@/lib/server-supabase";
 
 export const maxDuration = 30;
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -23,7 +24,60 @@ function limited(request: NextRequest, transcription = false, ticket = false): b
 async function handle(request: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path: segments } = await params;
   const path = segments.join("/");
-  if (!isBrowserWorkspace()) return proxyBackend(request, segments);
+  if (!isBrowserWorkspace()) {
+    if (!process.env.BACKEND_INTERNAL_URL) {
+      const serverSupabase = getServerSupabase();
+      if (serverSupabase) {
+        if (request.method === "GET" && path === "health") {
+          return json({ status: "ok", database: "Supabase PostgreSQL", redis: "not used", ai_configured: Boolean(process.env.GEMINI_API_KEY), billing_configured: false });
+        }
+        if (request.method === "GET" && path === "auth/me") {
+          const auth = await getAuthenticatedUser(request);
+          if (!auth) return json({ detail: "Sign in is required or your credentials were not accepted." }, 401);
+          return json(auth.user);
+        }
+        if (path === "auth/logout") {
+          const response = json({ ok: true });
+          clearSessionCookie(response);
+          return response;
+        }
+        if (request.method === "POST" && path === "auth/supabase-session") {
+          let body: Record<string, unknown> = {};
+          try { body = await request.json(); } catch { /* ignore */ }
+          const token = typeof body?.access_token === "string" ? body.access_token.trim() : "";
+          if (!token) return json({ detail: "A valid Supabase access token is required." }, 400);
+          const { data: { user: authUser }, error } = await serverSupabase.auth.getUser(token);
+          if (error || !authUser) return json({ detail: "Invalid Supabase session token." }, 401);
+          let { data: userRow } = await serverSupabase.from("users").select("*").eq("id", authUser.id).maybeSingle();
+          if (!userRow && authUser.email) {
+            const { data: byEmail } = await serverSupabase.from("users").select("*").eq("email", authUser.email).maybeSingle();
+            if (byEmail) userRow = byEmail;
+          }
+          if (!userRow) {
+            const name = authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email?.split("@")[0] || "User";
+            const { data: created } = await serverSupabase.from("users").insert({
+              id: authUser.id,
+              email: authUser.email || "",
+              name,
+              password_hash: "supabase_oauth",
+              plan: "free",
+              credit_seconds: 0,
+              profile: {},
+              preferences: {},
+              created_at: new Date().toISOString(),
+            }).select().single();
+            userRow = created;
+          }
+          if (!userRow) return json({ detail: "Could not create user record." }, 500);
+          const userObj = await formatUserResponse(serverSupabase, userRow);
+          const response = json(userObj);
+          setSessionCookie(response, token);
+          return response;
+        }
+      }
+    }
+    return proxyBackend(request, segments);
+  }
   if (request.method === "GET" && path === "health") {
     return json({ status: "ok", database: "this browser", redis: "not used", ai_configured: Boolean(process.env.GEMINI_API_KEY), billing_configured: false });
   }
