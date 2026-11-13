@@ -13,6 +13,7 @@ import {
   getServerSupabase,
   setSessionCookie
 } from "@/lib/server-supabase";
+import { chargeSession, type BillableSession } from "@/lib/session-usage";
 
 export const maxDuration = 30;
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -377,11 +378,27 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
     }
   }
 
+  // Live minute heartbeat: bills time since the last beat (server clock, capped) and returns updated minutes.
+  if (request.method === "POST" && segments[0] === "sessions" && segments[2] === "usage") {
+    if (!serverSupabase) return json({ detail: "Live sessions are unavailable." }, 503);
+    const auth = await getAuthenticatedUser(request);
+    if (!auth) return json({ detail: "Sign in is required." }, 401);
+    const { data: session } = await serverSupabase.from("live_sessions").select("*").eq("id", segments[1]).eq("user_id", auth.authId).maybeSingle();
+    if (!session) return json({ detail: "Session not found." }, 404);
+    const { charged } = await chargeSession(serverSupabase, session as BillableSession, auth.user.id);
+    const { data: row } = await serverSupabase.from("users").select("*").eq("id", auth.user.id).maybeSingle();
+    const user = row ? await formatUserResponse(serverSupabase, row) : auth.user;
+    return json({ charged_seconds: charged, user });
+  }
+
   if (request.method === "POST" && segments[0] === "sessions" && segments[2] === "stop") {
     if (!serverSupabase) return json({ detail: "Live sessions are unavailable." }, 503);
     const auth = await getAuthenticatedUser(request);
     if (!auth) return json({ detail: "Sign in is required." }, 401);
     const sessionId = segments[1];
+    // Bill the last few seconds since the final heartbeat before closing the session.
+    const { data: live } = await serverSupabase.from("live_sessions").select("*").eq("id", sessionId).eq("user_id", auth.authId).maybeSingle();
+    if (live) await chargeSession(serverSupabase, live as BillableSession, auth.user.id);
     const { data } = await serverSupabase.from("live_sessions").update({ status: "ended", ended_at: new Date().toISOString() }).eq("id", sessionId).eq("user_id", auth.authId).select().maybeSingle();
     if (!data) return json({ detail: "Session not found." }, 404);
     return json(data);

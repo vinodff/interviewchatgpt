@@ -18,6 +18,7 @@ type Question = Extract<LiveMessage, { type: "question" }>;
 type AnswerTerminal = Extract<LiveMessage, { type: "answer_complete" | "answer_cancelled" }>;
 type HeldAnswer = { question: Question; replayQuestion: boolean; delta: string; terminal: AnswerTerminal | null };
 const MAX_RECONNECTS = 8;
+const USAGE_HEARTBEAT_MS = 10000;
 /**
  * No live-socket backend is deployed: the hosted site, or a local run set to work like it
  * (NEXT_PUBLIC_LIVE_TRANSPORT=browser). Live sessions then always run browser-side.
@@ -51,6 +52,8 @@ export class LiveController {
   private cancelledGeneration: string | null = null;
   private browserRecognition: unknown = null;
   private browserAnswerTimer: ReturnType<typeof setInterval> | null = null;
+  // Live minute heartbeat: the server bills elapsed time and returns the updated minutes.
+  private usageTimer: ReturnType<typeof setInterval> | null = null;
   private questionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private currentAnswerText = "";
   private answeringQuestion = false;
@@ -81,7 +84,26 @@ export class LiveController {
   private nonEnglishWarned = false;
   private audioLevelCount = 0;
 
-  constructor(private notify: (event: LiveMessage | LocalEvent) => void, private onSession: (session: Session) => void) {}
+  constructor(private notify: (event: LiveMessage | LocalEvent) => void, private onSession: (session: Session) => void, private onUsage?: (user: User) => void) {}
+
+  /** Bill time so far and report the updated minutes; ends the session once no minutes remain. */
+  private async reportUsage(): Promise<void> {
+    const session = this.session;
+    if (this.stopped || !this.browserMode || !session || session.id.startsWith("local_")) return;
+    try {
+      const result = await api<{ user?: User }>(`/sessions/${encodeURIComponent(session.id)}/usage`, post());
+      const user = result?.user;
+      if (!user || this.stopped) return;
+      this.onUsage?.(user);
+      if (user.minute_limit !== null && user.minute_limit - user.minutes_used <= 0) {
+        await this.fail("You have used all your live minutes. Add minutes in Plans & billing to keep going.");
+      }
+    } catch { /* A missed beat is billed on the next one or on Stop; never interrupt the interview for it. */ }
+  }
+  private startUsageHeartbeat(): void {
+    if (this.usageTimer) return;
+    this.usageTimer = setInterval(() => { void this.reportUsage(); }, USAGE_HEARTBEAT_MS);
+  }
 
   public setPreferences(preferences?: Preferences): void {
     this.currentPreferences = preferences || null;
@@ -263,6 +285,7 @@ export class LiveController {
     }
     this.session = remote;
     this.onSession(remote);
+    void this.reportUsage();
   }
 
   private async connect(): Promise<void> {
@@ -487,6 +510,10 @@ export class LiveController {
       clearInterval(this.browserAnswerTimer);
       this.browserAnswerTimer = null;
     }
+    if (this.usageTimer) {
+      clearInterval(this.usageTimer);
+      this.usageTimer = null;
+    }
     if (this.questionDebounceTimer) {
       clearTimeout(this.questionDebounceTimer);
       this.questionDebounceTimer = null;
@@ -515,6 +542,7 @@ export class LiveController {
 
   private startBrowserLiveMode(): void {
     if (this.stopped) return;
+    this.startUsageHeartbeat();
 
     // Acquire Screen Wake Lock on mobile devices so screen and audio don't sleep.
     // The request resolves asynchronously, so stop() can run first: release the lock

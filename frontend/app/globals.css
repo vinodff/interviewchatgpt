@@ -1400,3 +1400,7 @@ dialog.modal { max-width:620px; width:calc(100% - 32px); max-height:calc(100vh -
   .mobile-live .answer-code { margin-inline:-10px; border-radius:8px; }
   .mobile-live .answer-code-block { padding:10px 12px 12px; font-size:clamp(12px, calc(var(--answer-font-size,17px) * .76), 14px); line-height:1.55; }
 }
+
+/* Live minutes remaining, next to the session clock */
+.live-minutes-left { margin: 8px 0 0; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.live-minutes-left strong { color: var(--teal); font-size: 14px; }

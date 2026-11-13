@@ -136,6 +136,9 @@ export function LivePanel({ sources, health, user, mobile, visible, headerBrand,
   const active = !["idle", "ended"].includes(state.phase);
   const readySources = sources.filter(source => source.status === "ready");
   const minutesAvailable = user.minute_limit === null || user.minute_limit > user.minutes_used;
+  // Counts down every second from the server's last figure; each heartbeat re-syncs it.
+  const usageSyncedAt = useRef(Date.now());
+  useEffect(() => { usageSyncedAt.current = Date.now(); }, [user.minutes_used, user.minute_limit]);
   const codeAnswerOpen = mobile && state.answer.includes("```") && codeExpandDismissed !== state.generation;
   const visibleAnswerHeight = displayedAnswerHeight(answerHeightFor(answerHeight, codeAnswerOpen), mobile ? viewportHeight : null);
   const resizeAnswer = (height: number) => { setCodeExpandDismissed(state.generation); setAnswerHeight(height); };
@@ -215,7 +218,7 @@ export function LivePanel({ sources, health, user, mobile, visible, headerBrand,
     readerGeneration.current = null; latestReaderSpeech.current = null; setReaderSpeech(null); setReaderCompletion(null);
     if (mobile) setCaptureOpen(false);
     try {
-      const live = new LiveController(notify, session => { if (mounted.current) onSession(session); });
+      const live = new LiveController(notify, session => { if (mounted.current) onSession(session); }, usage => { if (mounted.current) onUser(usage); });
       live.setPreferences(user.preferences);
       controller.current = live;
       // Capture permissions remain in Start's user gesture, including on mobile.
@@ -240,7 +243,10 @@ export function LivePanel({ sources, health, user, mobile, visible, headerBrand,
   const stopButton = <Button variant="danger" className={mobile ? "mobile-stop" : "wide"} onClick={() => { void controller.current?.stop(); }}><Square size={15} fill="currentColor" /> End interview</Button>;
   const startBlocked = !consent || health?.ai_configured === false || !minutesAvailable;
   const blockedReason = !minutesAvailable ? "No live minutes left" : health?.ai_configured === false ? "Live answers unavailable" : !consent ? "Confirm consent below" : "";
-  const headerStatus = active ? `${time} · ${status}` : blockedReason || status;
+  const secondsLeft = user.minute_limit === null ? null
+    : Math.max(0, Math.round((user.minute_limit - user.minutes_used) * 60 - (active && started ? (Date.now() - usageSyncedAt.current) / 1000 : 0)));
+  const minutesLeftLabel = secondsLeft === null ? "" : `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")} left`;
+  const headerStatus = active ? `${time} · ${minutesLeftLabel || status}` : blockedReason || (minutesLeftLabel ? `${status} · ${minutesLeftLabel}` : status);
   const mobileDock = <div className="mobile-live-dock" role="group" aria-label="Interview controls">
     {headerBrand}
     <div className="mobile-live-title"><h1>Live interview</h1><div className="mobile-capture-state" role="status"><span className={state.phase === "listening" ? "recording-dot" : "waiting-dot"} /><span>{headerStatus}</span></div></div>
@@ -453,6 +459,7 @@ export function LivePanel({ sources, health, user, mobile, visible, headerBrand,
               </div>
             </> : <>
               <div className="live-clock"><span className={state.phase === "listening" ? "recording-dot" : "waiting-dot"} />{time}<span>SESSION TIME</span></div>
+              {minutesLeftLabel && <p className="live-minutes-left" role="status" aria-live="off"><strong>{minutesLeftLabel.replace(" left", "")}</strong> live minutes left</p>}
               <div className="connection-row"><MonitorUp size={17} /><span>{mode === "tab" ? "Tab audio · interviewer" : "Microphone · mixed speakers"}</span><span className="channel-label">CH 0</span></div>
               {mode === "tab" && <div className="connection-row"><Mic size={17} /><span>Microphone · you</span><span className="channel-label">CH 1</span></div>}
               <p className="capture-status" role="status">{state.detail || "The assistant is listening for interview questions."}</p>

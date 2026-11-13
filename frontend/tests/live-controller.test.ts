@@ -748,6 +748,29 @@ describe("fast start on the hosted site", () => {
     await live.stop();
   });
 
+  it("reports live minutes every heartbeat and ends the session when none remain", async () => {
+    hosted();
+    let minutesUsed = 1;
+    doubles.api.mockImplementation((path: string) => path === "/sessions" ? Promise.resolve({ id: "remote", status: "created" })
+      : path === "/live/speech-ticket" ? Promise.resolve({ token: "auth_tokens/unit-test", expires_at: Date.now() + 60000 })
+      : path === "/sessions/remote/usage" ? Promise.resolve({ user: { id: "u1", minutes_used: (minutesUsed += 0.5), minute_limit: 2.5 } })
+      : Promise.resolve({ id: "remote", status: "ended" }));
+    const onUsage = vi.fn(); const notify = vi.fn();
+    const live = new LiveController(notify, vi.fn(), onUsage);
+    await live.start("microphone", "", false, { streamingMicrophone: true });
+    await vi.advanceTimersByTimeAsync(0);
+    // Complete the speech handshake so the session stays live.
+    const speech = Socket.instances.at(-1)!; speech.open(); speech.onmessage?.({ data: JSON.stringify({ setupComplete: {} }) });
+    expect(onUsage).toHaveBeenLastCalledWith(expect.objectContaining({ minutes_used: 1.5 }));
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(onUsage).toHaveBeenLastCalledWith(expect.objectContaining({ minutes_used: 2 }));
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringContaining("used all your live minutes") }));
+    const beats = doubles.api.mock.calls.filter(([path]) => path === "/sessions/remote/usage").length;
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(doubles.api.mock.calls.filter(([path]) => path === "/sessions/remote/usage")).toHaveLength(beats);
+  });
+
   it("closes a server session that arrives after Stop", async () => {
     hosted(); const finishSession = pendingSession();
     const live = new LiveController(vi.fn(), vi.fn());
