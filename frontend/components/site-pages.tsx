@@ -1,3 +1,4 @@
+import type { PaidPlanId } from "@/lib/plans";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, AudioLines, BookOpen, ChevronRight, CircleHelp, FileText, Folder, Mail, MapPin, MessageSquare, Monitor, Phone, ShieldCheck, SlidersHorizontal, Smartphone } from "lucide-react";
 import { ContactForm } from "./contact-form";
@@ -41,8 +42,8 @@ function HowItWorksPage() {
 }
 
 function PlansPage() {
-  return <><PageIntro eyebrow="TRANSPARENT PRICING" title="A plan for your next interview." description="Start free with live interview minutes. Choose a plan when you need more interview time." /><PricingSection full />
-    <section className="landing-container pricing-faq" aria-label="Pricing questions"><h2>A few clear answers.</h2><details><summary>What counts as a live minute?</summary><p>Time connected during a live interview counts toward your allowance. Uploading your resume, adjusting preferences, and reviewing saved interviews do not use live minutes.</p></details><details><summary>When do my minutes reset?</summary><p>Your allowance resets at the start of each calendar month. Unused minutes do not roll over. Paid subscriptions renew monthly from the subscription date.</p></details><details><summary>What happens when I use all my minutes?</summary><p>Live assistance stops at your limit. You can wait for the next monthly reset or choose an available paid plan. There are no automatic overage charges.</p></details><details><summary>Can I change or cancel a paid plan?</summary><p>Use Plans &amp; billing to open subscription management when paid plans are available. Review the terms shown there before confirming a change. <Link href="/contact">Contact support</Link> if you need help.</p></details></section><SiteCta /></>;
+  return <><PageIntro eyebrow="TRANSPARENT PRICING" title="Pay once. Use it when the call comes." description="One-time minute packs with no subscription and no auto-renewal. Your purchased minutes never expire." /><PricingSection full />
+    <section className="landing-container pricing-faq" aria-label="Pricing questions"><h2>A few clear answers.</h2><details><summary>What counts as a live minute?</summary><p>Time connected during a live interview counts toward your allowance. Uploading your resume, adjusting preferences, and reviewing saved interviews do not use live minutes.</p></details><details><summary>Is this a subscription?</summary><p>No. Each pack is a one-time payment. The minutes are added to your account and you are never charged again unless you buy another pack.</p></details><details><summary>Do my minutes expire?</summary><p>Purchased minutes never expire, so you can keep them for your next interview. Your free minutes reset at the start of each calendar month and do not roll over.</p></details><details><summary>What happens when I use all my minutes?</summary><p>Live assistance stops at your limit. Buy another pack any time and the new minutes stack on top of what you have. There are no automatic overage charges.</p></details><details><summary>Which payment methods can I use?</summary><p>Checkout runs on Cashfree, which supports UPI, debit and credit cards, and net banking. <Link href="/contact">Contact support</Link> if a payment does not go through.</p></details></section><SiteCta /></>;
 }
 
 function AboutPage() {
@@ -55,7 +56,7 @@ function HelpPage() {
   return <><PageIntro eyebrow="LET’S KEEP YOU MOVING" title="A little help, right here." description="Find a quick answer, work through setup, or get in touch when something doesn’t feel right." /><section className="landing-container help-section" aria-label="Help articles"><HelpCenter /></section></>;
 }
 
-function ContactPage({ selectedPlan }: { selectedPlan?: "starter" | "pro" }) {
+function ContactPage({ selectedPlan }: { selectedPlan?: PaidPlanId }) {
   return <><PageIntro eyebrow="CONTACT US" title="Let’s find the next step." description="Need help, have a question, or see a way to make the interview screen better? We’d like to hear it." /><section className="landing-container contact-layout"><aside data-reveal>
     <div className="contact-direct"><Mail size={25} aria-hidden="true" /><h2>A direct line.</h2><a href={`mailto:${supportEmail}`}>{supportEmail} <ArrowUpRight size={14} /></a><p>For product questions, account help, feedback, and privacy requests.</p></div>
     <div className="contact-help"><Phone size={23} aria-hidden="true" /><h2>Phone support.</h2><a href={`tel:${supportPhone.replace(/\s+/g, "")}`}>{supportPhone} <ArrowUpRight size={14} /></a><p>Customer care assistance available {businessHours}.</p></div>
@@ -118,7 +119,7 @@ function PolicyPage({ title, description, sections }: { title: string; descripti
   return <><PageIntro eyebrow="THE ESSENTIALS, IN PLAIN LANGUAGE" title={title} description={description} /><div className="landing-container policy-layout"><aside><p className="eyebrow">ON THIS PAGE</p><nav aria-label={`${title} contents`}>{sections.map(section => <a href={`#${section.id}`} key={section.id}>{section.title}<ChevronRight size={13} /></a>)}</nav><p className="policy-date">Updated November 2026</p></aside><article>{sections.map((section, index) => <section key={section.id} id={section.id} data-reveal><span className="policy-index">{String(index + 1).padStart(2, "0")}</span><h2>{section.title}</h2>{section.content}</section>)}</article></div></>;
 }
 
-export function SitePageContent({ slug, selectedPlan }: { slug: SitePage; selectedPlan?: "starter" | "pro" }) {
+export function SitePageContent({ slug, selectedPlan }: { slug: SitePage; selectedPlan?: PaidPlanId }) {
   switch (slug) {
     case "features": return <FeaturesPage />;
     case "how-it-works": return <HowItWorksPage />;

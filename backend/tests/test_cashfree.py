@@ -44,9 +44,9 @@ def test_cashfree_plans_catalog(cf_app, monkeypatch):
 
     # Verify amounts in INR
     amounts = {p["id"]: p["amount"] for p in data["plans"]}
-    assert amounts["starter"] == 10000  # ₹100
-    assert amounts["pro"] == 20000      # ₹200
-    assert amounts["value"] == 50000    # ₹500
+    assert amounts["starter"] == 19900  # ₹199
+    assert amounts["pro"] == 49900      # ₹499
+    assert amounts["value"] == 99900    # ₹999
 
 
 def test_webhook_signature_verification(monkeypatch):

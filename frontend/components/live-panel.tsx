@@ -4,7 +4,7 @@ import { isBrowserWorkspace } from "@/lib/workspace-mode";
 import { api, messageOf } from "@/lib/api";
 import { LiveController, type LocalEvent } from "@/lib/live-controller";
 import { initialLiveState, reduceLiveMessage, type LiveMessage, type LiveState } from "@/lib/protocol";
-import { ANSWER_HEIGHT_DEFAULT, ANSWER_HEIGHT_KEY, ANSWER_HEIGHT_MAX, ANSWER_HEIGHT_MIN, answerHeightFromDrag, answerHeightFromKey, clampAnswerHeight, displayedAnswerHeight, readAnswerHeight } from "@/lib/mobile-live-layout";
+import { ANSWER_HEIGHT_DEFAULT, ANSWER_HEIGHT_KEY, ANSWER_HEIGHT_MAX, ANSWER_HEIGHT_MIN, answerHeightFor, answerHeightFromDrag, answerHeightFromKey, clampAnswerHeight, displayedAnswerHeight, readAnswerHeight } from "@/lib/mobile-live-layout";
 import type { Health, Session, Source, User } from "@/lib/types";
 import type { AudioMode } from "@/lib/capture";
 import type { MicrophoneLevel } from "@/lib/enhanced-recognition";
@@ -19,14 +19,15 @@ const serverCaptureSnapshot = () => false;
 
 type LivePanelProps = {
   sources: Source[]; health: Health | null; user: User; mobile: boolean; visible: boolean;
-  toolbar: ReactNode; alerts: ReactNode; onUser: (user: User) => void;
+  /** Mobile header slots: the home-link brand and the navigation menu button. */
+  headerBrand: ReactNode; headerMenu: ReactNode; alerts: ReactNode; onUser: (user: User) => void;
   onAnswerHeight: (height: number) => void; onViewportHeight: (height: number) => void; onActive: (active: boolean) => void; onSession: (session: Session) => void;
   // Lets the workspace stop this session from outside the Live tab (H-2):
   // the panel stays mounted while hidden, so its own End button is unreachable.
   onStopReady?: (stop: () => Promise<void>) => void;
 };
 
-export function LivePanel({ sources, health, user, mobile, visible, toolbar, alerts, onUser, onAnswerHeight, onViewportHeight, onActive, onSession, onStopReady }: LivePanelProps) {
+export function LivePanel({ sources, health, user, mobile, visible, headerBrand, headerMenu, alerts, onUser, onAnswerHeight, onViewportHeight, onActive, onSession, onStopReady }: LivePanelProps) {
   const [state, setState] = useState<LiveState>(initialLiveState);
   const [mode, setMode] = useState<AudioMode>("microphone");
   const [microphoneEngine, setMicrophoneEngine] = useState("streaming");
@@ -110,6 +111,8 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
   const [started, setStarted] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [answerHeight, setAnswerHeight] = useState(ANSWER_HEIGHT_DEFAULT);
+  // The answer a resize happened on: from then on that answer keeps the user's size, not the code auto-expand.
+  const [codeExpandDismissed, setCodeExpandDismissed] = useState<string | null>(null);
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const [captureOpen, setCaptureOpen] = useState(true);
   const [optionsOpen, setOptionsOpen] = useState(false);
@@ -133,7 +136,9 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
   const active = !["idle", "ended"].includes(state.phase);
   const readySources = sources.filter(source => source.status === "ready");
   const minutesAvailable = user.minute_limit === null || user.minute_limit > user.minutes_used;
-  const visibleAnswerHeight = displayedAnswerHeight(answerHeight, mobile ? viewportHeight : null);
+  const codeAnswerOpen = mobile && state.answer.includes("```") && codeExpandDismissed !== state.generation;
+  const visibleAnswerHeight = displayedAnswerHeight(answerHeightFor(answerHeight, codeAnswerOpen), mobile ? viewportHeight : null);
+  const resizeAnswer = (height: number) => { setCodeExpandDismissed(state.generation); setAnswerHeight(height); };
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; void controller.current?.stop(); }; }, []);
   useEffect(() => {
     // The Android host emits this before its WebView is paused or replaced.
@@ -227,14 +232,23 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
   function resizeAt(clientY: number) {
     const bounds = layout.current?.getBoundingClientRect();
     const drag = dragging.current;
-    if (bounds && drag) setAnswerHeight(answerHeightFromDrag(drag.startHeight, drag.startY, clientY, bounds.height));
+    if (bounds && drag) resizeAnswer(answerHeightFromDrag(drag.startHeight, drag.startY, clientY, bounds.height));
   }
   const status = { idle: "Ready when you are", capturing: "Waiting for permission", connecting: "Connecting", listening: "Listening live", reconnecting: "Reconnecting", ended: "Session stopped" }[state.phase];
   const time = `${Math.floor(elapsed / 60).toString().padStart(2, "0")}:${(elapsed % 60).toString().padStart(2, "0")}`;
   const style = { "--answer-height": `${visibleAnswerHeight}%`, ...(mobile && viewportHeight ? { "--live-viewport-height": `${viewportHeight}px` } : {}) } as CSSProperties;
   const stopButton = <Button variant="danger" className={mobile ? "mobile-stop" : "wide"} onClick={() => { void controller.current?.stop(); }}><Square size={15} fill="currentColor" /> End interview</Button>;
+  const startBlocked = !consent || health?.ai_configured === false || !minutesAvailable;
+  const blockedReason = !minutesAvailable ? "No live minutes left" : health?.ai_configured === false ? "Live answers unavailable" : !consent ? "Confirm consent below" : "";
+  const headerStatus = active ? `${time} · ${status}` : blockedReason || status;
+  const mobileDock = <div className="mobile-live-dock" role="group" aria-label="Interview controls">
+    {headerBrand}
+    <div className="mobile-live-title"><h1>Live interview</h1><div className="mobile-capture-state" role="status"><span className={state.phase === "listening" ? "recording-dot" : "waiting-dot"} /><span>{headerStatus}</span></div></div>
+    {active ? <Button variant="danger" className="mobile-stop" aria-label="End interview" onClick={() => { void controller.current?.stop(); }}><Square size={13} fill="currentColor" /> End</Button> : <Button className="mobile-start" aria-label="Start interview" disabled={startBlocked} onClick={start}><Radio size={16} /> Start</Button>}
+    {headerMenu}
+  </div>;
 
-  return <div ref={layout} className="live-workspace" style={style}>
+  return <div ref={layout} className={`live-workspace ${active ? "is-live" : "is-idle"}`} style={style}>
     {visible && <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{state.announcement}</div>}
     <div className="live-desktop-heading"><SectionHeader eyebrow="YOUR VOICE. YOUR EVIDENCE." title="Live interview" description="Stay in the conversation. Relevant context arrives as questions are spoken." action={<div className={`live-state-label ${state.phase === "listening" ? "is-live" : ""}`} role="status"><span className="status-dot" />{status}</div>} /></div>
 
@@ -275,22 +289,21 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
     <section id="live-controls-pane" className="live-lower-region" aria-label="Live controls and context">
       {mobile && <>
         <div className="answer-resize-handle" role="separator" aria-label="Resize answer area" aria-orientation="horizontal" aria-controls="live-answer-pane live-controls-pane" aria-valuemin={ANSWER_HEIGHT_MIN} aria-valuemax={displayedAnswerHeight(ANSWER_HEIGHT_MAX, viewportHeight)} aria-valuenow={visibleAnswerHeight} aria-valuetext={`${visibleAnswerHeight} percent of the screen for the answer`} tabIndex={0}
-          onKeyDown={event => { const next = answerHeightFromKey(visibleAnswerHeight, event.key); if (next !== null) { event.preventDefault(); setAnswerHeight(next); } }}
+          onKeyDown={event => { const next = answerHeightFromKey(visibleAnswerHeight, event.key); if (next !== null) { event.preventDefault(); resizeAnswer(next); } }}
           onPointerDown={event => { if (event.pointerType === "mouse" && event.button !== 0) return; dragging.current = { id: event.pointerId, startY: event.clientY, startHeight: visibleAnswerHeight, moved: false }; event.currentTarget.setPointerCapture(event.pointerId); }}
           onPointerMove={event => { const drag = dragging.current; if (drag?.id !== event.pointerId || (!drag.moved && Math.abs(event.clientY - drag.startY) < 1)) return; drag.moved = true; resizeAt(event.clientY); }}
           onPointerUp={event => { if (dragging.current?.id === event.pointerId) { if (dragging.current.moved) resizeAt(event.clientY); dragging.current = null; event.currentTarget.releasePointerCapture(event.pointerId); } }}
           onPointerCancel={() => { dragging.current = null; }} onLostPointerCapture={() => { dragging.current = null; }}>
           <span className="resize-grip" aria-hidden="true" /><span>Answer area · {visibleAnswerHeight}%</span><span className="sr-only">Use arrow keys or drag to resize. Home selects 15 percent; End selects the maximum available height.</span>
         </div>
-        <div className="mobile-live-toolbar">{toolbar}</div>
-        <div className="mobile-capture-bar"><div className="mobile-capture-state" role="status"><span className={state.phase === "listening" ? "recording-dot" : "waiting-dot"} /><span>{status}<small>{active ? `${mode === "tab" ? "Tab + mic" : "Microphone"} · ${time}` : "Audio capture is off"}</small></span></div>{active && stopButton}</div>
+        {mobileDock}
       </>}
 
       <div className="live-lower-scroll" tabIndex={mobile ? 0 : undefined} aria-label={mobile ? "Scrollable live controls" : undefined}>
         {Object.entries(state.transcriptionWarnings).map(([channel, message]) => <Alert key={channel} tone="info">{message}</Alert>)}
         <div className="live-alerts">{alerts}{state.error && <Alert>{state.error}</Alert>}{health?.ai_configured === false && <Alert tone="info">Live answers are unavailable right now. Try again later or contact support.</Alert>}{!minutesAvailable && <Alert tone="info">You’ve used your live minutes for this month. View Plans &amp; billing for your options.</Alert>}{active && elapsed >= 20 && state.transcripts.length === 0 && <Alert tone="info">No speech recognised yet. If the microphone meter above stays near silent, move closer, unmute, or pick another microphone. If the meter moves but no words appear, try Enhanced or Standard speech recognition, or type the question below.</Alert>}</div>
         <aside className="live-control">
-          <details className="panel capture-panel live-collapsible" open={!mobile || captureOpen} onToggle={event => { if (mobile) setCaptureOpen(event.currentTarget.open); }}>
+          <details className="panel capture-panel live-collapsible" open={!mobile || !active || captureOpen} onToggle={event => { if (mobile && active) setCaptureOpen(event.currentTarget.open); }}>
             <summary><Headphones size={18} /><span>{active ? "Interview audio" : "Interview setup"}</span><ChevronDown size={17} /></summary>
             <div className="panel-heading"><h2>{active ? "Your connection" : "Before you go live"}</h2><Headphones size={18} /></div>
             {!active ? <>
@@ -428,7 +441,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
                   </label>
                   <Button
                     className="wide start-interview-main-btn"
-                    disabled={!consent || health?.ai_configured === false || !minutesAvailable}
+                    disabled={startBlocked}
                     onClick={start}
                   >
                     <Radio size={18} /> Start live interview <ArrowIcon />
@@ -452,7 +465,7 @@ export function LivePanel({ sources, health, user, mobile, visible, toolbar, ale
             <summary><Waves size={18} /><span>Answer options</span><ChevronDown size={17} /></summary>
             <div className="panel-heading"><h2>Answer options</h2><Waves size={18} /></div>
             <LiveAnswerPreferences user={user} onUser={onUser} />
-            {mobile && <><label className="answer-height-control">Answer area height <output>{answerHeight}%</output><input aria-label="Answer area height" type="range" min={ANSWER_HEIGHT_MIN} max={ANSWER_HEIGHT_MAX} step={1} value={answerHeight} onChange={event => setAnswerHeight(clampAnswerHeight(Number(event.target.value)))} /></label>{visibleAnswerHeight !== answerHeight && <p className="preference-help">The answer area is temporarily {visibleAnswerHeight}% to keep live controls visible. Your {answerHeight}% preference returns when more screen space is available.</p>}</>}
+            {mobile && <><label className="answer-height-control">Answer area height <output>{answerHeight}%</output><input aria-label="Answer area height" type="range" min={ANSWER_HEIGHT_MIN} max={ANSWER_HEIGHT_MAX} step={1} value={answerHeight} onChange={event => resizeAnswer(clampAnswerHeight(Number(event.target.value)))} /></label>{visibleAnswerHeight !== answerHeight && <p className="preference-help">The answer area is temporarily {visibleAnswerHeight}% to keep live controls visible. Your {answerHeight}% preference returns when more screen space is available.</p>}</>}
           </details>
 
           <details className="panel context-panel live-collapsible" open={!mobile || contextOpen} onToggle={event => { if (mobile) setContextOpen(event.currentTarget.open); }}>

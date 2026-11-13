@@ -26,14 +26,14 @@ async function billingAccount(page: Page, { testing = false, pending = false } =
 test("credit purchases use a real phone and official modal checkout, then refresh verified account credit", async ({ page }) => {
   const account = await billingAccount(page);
   await page.goto("/interview?view=billing");
-  await page.getByRole("button", { name: "Buy Starter", exact: true }).click();
+  await page.getByRole("button", { name: "Get 20 minutes", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("10-digit Indian mobile");
   expect(account.orders).toEqual([]);
   await page.getByLabel("Mobile number for payment", { exact: true }).fill("+91 9876543210");
-  await page.getByRole("button", { name: "Buy Starter", exact: true }).click();
+  await page.getByRole("button", { name: "Get 20 minutes", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("20 interview minutes were added");
   await expect(page.locator(".billing-summary")).toContainText("20 purchased credits remaining");
-  await expect(page.getByRole("button", { name: "Buy Starter", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Get 20 minutes", exact: true })).toBeEnabled();
   expect(account.orders).toEqual([{ plan: "starter", phone: "9876543210" }]);
   expect(await page.evaluate(() => (window as unknown as { checkoutRequest: unknown }).checkoutRequest)).toEqual({ config: { mode: "sandbox" }, options: { paymentSessionId: "test-payment-session", redirectTarget: "_modal" } });
 });
@@ -41,7 +41,7 @@ test("credit purchases use a real phone and official modal checkout, then refres
 test("preview accounts cannot purchase even when a catalog offers Cashfree checkout", async ({ page }) => {
   const account = await billingAccount(page, { testing: true });
   await page.goto("/interview?view=billing&cf_order_id=ipo_test");
-  await expect(page.getByRole("button", { name: "Buy Starter", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Get 20 minutes", exact: true })).toBeDisabled();
   expect(account.checks()).toBe(0); expect(account.orders).toEqual([]);
 });
 

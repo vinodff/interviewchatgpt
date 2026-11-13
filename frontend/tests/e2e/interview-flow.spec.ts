@@ -163,3 +163,37 @@ test("interview controls and plans fit the smallest supported screen", async ({ 
   const overflow = await page.evaluate(() => [...document.querySelectorAll("body *")].filter(element => element.getBoundingClientRect().right > innerWidth + 1 && element.getBoundingClientRect().width > 0).map(element => ({ tag: element.tagName, class: element.className, right: Math.round(element.getBoundingClientRect().right) })).slice(0, 12));
   expect(overflow).toEqual([]);
 });
+
+test("signed-in users can go back to the website home page from the app", async ({ page }) => {
+  await mockAccount(page);
+  await page.goto("/interview?view=overview");
+  await page.getByRole("navigation", { name: "Website", exact: true }).getByRole("link", { name: "Home page" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator(".site-header")).toBeVisible();
+});
+
+test("a plan picked for checkout stays on billing and does not leak into other screens", async ({ page }) => {
+  await mockAccount(page);
+  await page.goto("/interview?view=billing&plan=value");
+  await page.getByRole("button", { name: "My profile", exact: true }).click();
+  await expect(page).toHaveURL(/\/interview\?view=profile$/);
+  await page.getByRole("button", { name: "Plans & billing", exact: true }).click();
+  await expect(page).toHaveURL(/\/interview\?view=billing&plan=value$/);
+});
+
+test("on a phone the answer comes first and the control dock keeps home, status, Start and the menu in view", async ({ page }) => {
+  await mockAccount(page);
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto("/interview?view=live");
+  const header = page.locator(".mobile-live-dock");
+  expect((await page.locator("#live-answer-pane").boundingBox())!.y).toBe(0);
+  expect((await header.boundingBox())!.y).toBeGreaterThan((await page.locator("#live-answer-pane").boundingBox())!.height);
+  await expect(header.getByRole("heading", { name: "Live interview", exact: true })).toBeInViewport();
+  await expect(header.getByRole("link", { name: "InterviewWin home page" })).toBeInViewport();
+  await expect(header.getByRole("button", { name: "Start interview", exact: true })).toBeEnabled();
+  await expect(header.getByRole("button", { name: "Start interview", exact: true })).toBeInViewport();
+  await expect(header.getByRole("button", { name: "Open navigation", exact: true })).toBeInViewport();
+  // Setup is never collapsed before a session, so the full Start button is always reachable too.
+  await expect(page.locator(".capture-panel")).toHaveAttribute("open", "");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

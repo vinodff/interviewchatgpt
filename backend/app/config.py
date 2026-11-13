@@ -56,11 +56,11 @@ class Settings(BaseSettings):
     session_days: int = 7
     free_minutes: int = Field(default=2, ge=0)
     starter_minutes: int = Field(default=20, gt=0)
-    pro_minutes: int = Field(default=45, gt=0)
-    value_minutes: int = Field(default=120, gt=0)
-    starter_price_minor: int = Field(default=10000, gt=0)
-    pro_price_minor: int = Field(default=20000, gt=0)
-    value_price_minor: int = Field(default=50000, gt=0)
+    pro_minutes: int = Field(default=60, gt=0)
+    value_minutes: int = Field(default=150, gt=0)
+    starter_price_minor: int = Field(default=19900, gt=0)
+    pro_price_minor: int = Field(default=49900, gt=0)
+    value_price_minor: int = Field(default=99900, gt=0)
     max_session_seconds: int = 7200
     github_token: SecretStr = SecretStr("")
     github_client_id: str = ""

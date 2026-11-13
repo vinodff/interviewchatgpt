@@ -14,7 +14,7 @@ export const refundTurnaround = "5 to 7 working days";
 export const sitePages = {
   features: { title: "Features", description: "Explore source-grounded answers, readable talking points, and an interview assistant built around your experience." },
   "how-it-works": { title: "How it works", description: "From your first source to a consent-based live conversation: get started with InterviewWin." },
-  plans: { title: "Pricing & Plans (INR)", description: "Compare Free, Starter, and Pro plans for live interview assistance, with transparent INR pricing and instant digital delivery." },
+  plans: { title: "Pricing & Plans (INR)", description: "One-time live interview minute packs from ₹199: Starter, Popular, and Value. Transparent INR pricing, no subscription, minutes never expire." },
   about: { title: "About", description: "Why we’re building a calmer, more thoughtful way to bring your experience into a conversation." },
   help: { title: "Help center", description: "Find answers about getting started, microphone permissions, sources, and your data." },
   contact: { title: "Contact Us", description: "Get help with InterviewWin, locate our registered office, or speak with our team." },

@@ -1,3 +1,4 @@
+import { resolveAuthToken } from "./api";
 import { loadCashfree } from "./billing-checkout";
 
 export interface CashfreeOrder {
@@ -13,12 +14,15 @@ export interface CashfreeOrderStatus {
   cf_payment_id?: string | null;
 }
 
-const SUPABASE_CREATE_ORDER_URL =
-  "https://vcpvpzxytleafevindjb.supabase.co/functions/v1/cashfree-create-order";
-const SUPABASE_VERIFY_ORDER_URL =
-  "https://vcpvpzxytleafevindjb.supabase.co/functions/v1/cashfree-verify-order";
 const HOSTED_CHECKOUT_URL =
   "https://vinodff.github.io/incoin-auto-v1/cashfree-checkout.html";
+
+/** Both Cashfree routes authenticate the caller, so the Supabase access token must travel with them. */
+async function authorizationHeader(): Promise<Record<string, string>> {
+  const token = await resolveAuthToken();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
 
 export class CashfreeService {
   /**
@@ -40,41 +44,11 @@ export class CashfreeService {
       customer_id: params.customerId,
     };
 
-    const isLocal =
-      typeof window !== "undefined" &&
-      (window.location.hostname === "localhost" ||
-        window.location.hostname === "127.0.0.1" ||
-        window.location.hostname === "0.0.0.0");
+    const auth = await authorizationHeader();
 
-    // Primary: Call Supabase Edge Function (skip on local to avoid DNS failure)
-    if (!isLocal) {
-      try {
-        const response = await fetch(SUPABASE_CREATE_ORDER_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.payment_session_id && data.order_id) {
-            return {
-              order_id: data.order_id,
-              payment_session_id: data.payment_session_id,
-              amount: params.amount,
-              plan: params.plan,
-            };
-          }
-        }
-      } catch {
-        // Fallback to Next.js route if Edge function network had a momentary blip
-      }
-    }
-
-    // Fallback: Next.js internal API
     const fallbackRes = await fetch("/api/billing/cashfree/create-order", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...auth },
       body: JSON.stringify(payload),
     });
 
@@ -96,38 +70,12 @@ export class CashfreeService {
    * Returns: ACTIVE | PAID | EXPIRED | TERMINATED
    */
   static async getOrderStatus(orderId: string): Promise<CashfreeOrderStatus> {
-    const isLocal =
-      typeof window !== "undefined" &&
-      (window.location.hostname === "localhost" ||
-        window.location.hostname === "127.0.0.1" ||
-        window.location.hostname === "0.0.0.0");
+    const auth = await authorizationHeader();
 
-    // Primary: Supabase Edge Function (skip on local to avoid DNS failure)
-    if (!isLocal) {
-      try {
-        const response = await fetch(SUPABASE_VERIFY_ORDER_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ order_id: orderId }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          return {
-            order_status: data.order_status || "UNKNOWN",
-            order_amount: data.order_amount,
-            cf_payment_id: data.cf_payment_id,
-          };
-        }
-      } catch {
-        // Fallback to Next.js route
-      }
-    }
-
-    // Fallback: Next.js internal API (use query param first to ensure static route handler takes priority over rewrites)
-    let fallbackRes = await fetch(`/api/billing/cashfree/verify?order_id=${encodeURIComponent(orderId)}`);
+    // Next.js internal API (use query param first to ensure static route handler takes priority over rewrites)
+    let fallbackRes = await fetch(`/api/billing/cashfree/verify?order_id=${encodeURIComponent(orderId)}`, { headers: auth });
     if (!fallbackRes.ok) {
-      fallbackRes = await fetch(`/api/billing/cashfree/verify/${encodeURIComponent(orderId)}`);
+      fallbackRes = await fetch(`/api/billing/cashfree/verify/${encodeURIComponent(orderId)}`, { headers: auth });
     }
     if (fallbackRes.ok) {
       const data = await fallbackRes.json();

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type RefObject } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { advanceReaderClock, createReaderClock, readingWordsPerMinute, type ReaderClockState } from "@/lib/answer-reader";
 import { formatAnswer, formattedAnswerWords, type AnswerSegment } from "@/lib/answer-format";
 import type { Preferences } from "@/lib/types";
@@ -111,5 +111,25 @@ export function AnswerReader({ answer, generation, active, visible, completion, 
   const font = preferences?.answer_font || "system";
   const theme = preferences?.answer_theme || "default";
   const displayStyle = { "--answer-font-size": `${textSize}px` } as CSSProperties;
-  return <div className="answer-text" data-reader-mode={mode} data-reader-position={position} data-reader-status={mode === "off" ? "off" : !enabled ? "paused" : progress.source} data-reader-generation={generation || ""} data-answer-font={font} data-answer-theme={theme} style={displayStyle}>{segments.map(segment => segment.kind === "fence" ? <span key={`fence-${segment.start}`} className="answer-code-fence" aria-hidden="true">{answer.slice(segment.start, segment.end)}</span> : segment.kind === "code" ? <pre key={`code-${segment.start}`} className="answer-code-block" data-language={segment.language}><code>{renderRange(segment)}</code></pre> : <Fragment key={`text-${segment.start}`}>{renderRange(segment)}</Fragment>)}</div>;
+  return <div className="answer-text" data-reader-mode={mode} data-reader-position={position} data-reader-status={mode === "off" ? "off" : !enabled ? "paused" : progress.source} data-reader-generation={generation || ""} data-answer-font={font} data-answer-theme={theme} style={displayStyle}>{segments.map(segment => segment.kind === "fence" ? <span key={`fence-${segment.start}`} className="answer-code-fence" aria-hidden="true">{answer.slice(segment.start, segment.end)}</span> : segment.kind === "code" ? <CodeBlock key={`code-${segment.start}`} language={segment.language} code={answer.slice(segment.start, segment.end)}>{renderRange(segment)}</CodeBlock> : <Fragment key={`text-${segment.start}`}>{renderRange(segment)}</Fragment>)}</div>;
+}
+
+const LANGUAGE_LABELS: Record<string, string> = { py: "Python", python: "Python", js: "JavaScript", javascript: "JavaScript", ts: "TypeScript", typescript: "TypeScript", java: "Java", go: "Go", golang: "Go", rust: "Rust", cpp: "C++", "c++": "C++", c: "C", cs: "C#", csharp: "C#", "c#": "C#", sql: "SQL", sh: "Shell", bash: "Shell", kotlin: "Kotlin", swift: "Swift", ruby: "Ruby", php: "PHP", html: "HTML", css: "CSS", json: "JSON" };
+
+/** A code answer: language label and copy button above code that scrolls sideways instead of breaking lines. */
+function CodeBlock({ language, code, children }: { language?: string; code: string; children: ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const label = (language && LANGUAGE_LABELS[language]) || (language ? language.toUpperCase() : "Code");
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(code.replace(/\n$/, ""));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch { /* Clipboard can be blocked; the code is still selectable. */ }
+  }
+  return <figure className="answer-code" data-language={language}>
+    {/* Label and button text come from CSS so the answer's text content stays exactly the answer. */}
+    <figcaption className="answer-code-head" data-label={label}><button type="button" className="answer-code-copy" data-copied={copied ? "true" : undefined} onClick={() => { void copy(); }} aria-label={copied ? `${label} code copied` : `Copy ${label} code`} /></figcaption>
+    <pre className="answer-code-block" data-language={language}><code>{children}</code></pre>
+  </figure>;
 }

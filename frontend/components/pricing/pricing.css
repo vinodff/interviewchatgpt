@@ -1,0 +1,154 @@
+/* Minute-pack pricing cards. Uses the site tokens from globals.css (--ink, --teal, --paper, --line, --muted). */
+.pc-section {
+  --pc-ink: var(--ink, #203631);
+  --pc-teal: var(--teal, #15675b);
+  --pc-teal-dark: var(--teal-dark, #115145);
+  --pc-wash: var(--teal-wash, #eaf2ec);
+  --pc-line: var(--line, #e2e6de);
+  --pc-muted: var(--muted, #596b60);
+  --pc-save: #1d7a3e;
+  --pc-save-wash: #e3f3e7;
+  /* Featured (Popular) card palette */
+  --pc-night: #132c26;
+  --pc-night-2: #1c3b33;
+  --pc-lime: #6fdaa8;
+  --pc-lime-hover: #8ae4ba;
+  --pc-on-night: #f2f7f1;
+  --pc-on-night-muted: rgba(226, 238, 228, .74);
+  --pc-ease: cubic-bezier(.16, 1, .3, 1);
+}
+
+.pc-head { display: grid; justify-items: center; gap: 14px; text-align: center; margin: 0 auto 52px; max-width: 640px; }
+.pc-eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 7px 16px; border-radius: 999px; background: #eef4ec; color: #1d5a44; border: 1px solid #cfe0d3; font-size: 13px; font-weight: 600; }
+.pc-head h2 { font-size: clamp(30px, 4.4vw, 46px); font-weight: 700; line-height: 1.08; letter-spacing: -1.4px; color: var(--pc-ink); }
+.pc-head h2 em { font-family: var(--serif); font-style: italic; font-weight: 500; color: var(--pc-teal); }
+.pc-head p { color: var(--pc-muted); font-size: 16px; }
+
+.pc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; align-items: start; max-width: 1100px; margin: 0 auto; padding-top: 18px; }
+
+/* ---------- Base card ---------- */
+.pc-card {
+  position: relative; display: flex; flex-direction: column; min-width: 0;
+  padding: 30px 26px 28px; border: 1px solid var(--pc-line); border-radius: 22px;
+  background: var(--surface, #fff); color: var(--pc-ink);
+  box-shadow: 0 1px 2px rgba(32, 54, 49, .04);
+  transition: transform .3s var(--pc-ease), box-shadow .3s var(--pc-ease), border-color .3s var(--pc-ease);
+}
+.pc-card:hover { transform: translateY(-4px); border-color: #cdd7cb; box-shadow: 0 22px 44px -22px rgba(32, 54, 49, .3); }
+.pc-card--selected { outline: 3px solid #9bd48b; outline-offset: 3px; }
+
+.pc-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pc-name { font-size: 21px; font-weight: 700; letter-spacing: -.4px; }
+.pc-ribbon { flex: none; padding: 4px 10px; border-radius: 999px; background: #eef4ec; color: #12614a; font-size: 11.5px; font-weight: 700; }
+.pc-tagline { margin-top: 5px; color: var(--pc-muted); font-size: 14px; line-height: 1.45; min-height: 2.9em; }
+
+/* Price */
+.pc-price-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 22px; }
+.pc-was { color: var(--pc-muted); font-size: 20px; font-weight: 600; text-decoration-thickness: 2px; text-decoration-color: rgba(163, 60, 53, .7); }
+.pc-amount { font-size: 50px; font-weight: 800; line-height: 1; letter-spacing: -2.2px; }
+.pc-save { padding: 4px 9px; border-radius: 7px; background: var(--pc-save-wash); color: var(--pc-save); font-size: 12.5px; font-weight: 800; }
+.pc-terms { margin-top: 8px; color: var(--pc-muted); font-size: 13px; }
+
+/* What you get */
+.pc-minutes-panel { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; padding: 16px 16px 15px; border-radius: 16px; background: var(--pc-wash); }
+.pc-minutes { display: flex; align-items: baseline; gap: 7px; font-size: 15px; font-weight: 600; }
+.pc-minutes strong { font-family: var(--serif); font-size: 44px; font-weight: 500; line-height: 1; letter-spacing: -1.4px; color: var(--pc-teal); }
+.pc-minutes-sub { margin-top: 6px; color: var(--pc-muted); font-size: 13px; line-height: 1.35; }
+.pc-rate { flex: none; padding: 6px 10px; border-radius: 10px; background: var(--surface, #fff); color: var(--pc-teal-dark); font-size: 14px; font-weight: 800; text-align: center; box-shadow: 0 1px 0 rgba(32, 54, 49, .06); }
+.pc-rate small { font-size: 11px; font-weight: 600; opacity: .75; }
+
+/* CTA */
+.pc-action { margin-top: 20px; }
+.pc-card .pc-button {
+  position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; min-height: 54px; padding: 0 20px; border: 0; border-radius: 999px;
+  background: var(--pc-ink); color: #fff; font-size: 15.5px; font-weight: 700; text-decoration: none;
+  transition: background .18s, transform .18s var(--pc-ease), box-shadow .18s;
+}
+.pc-card .pc-button svg { transition: transform .2s var(--pc-ease); }
+.pc-card .pc-button:hover:not(:disabled) { background: var(--pc-teal-dark); }
+.pc-card .pc-button:hover:not(:disabled) svg { transform: translateX(3px); }
+.pc-card .pc-button:active:not(:disabled) { transform: scale(.98); }
+.pc-card .pc-button:focus-visible { outline: 3px solid #9bd48b; outline-offset: 3px; }
+.pc-current { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 54px; border-radius: 999px; background: var(--pc-wash); color: var(--pc-teal); font-weight: 700; }
+.pc-assure { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 11px; color: var(--pc-muted); font-size: 12.5px; font-weight: 500; }
+
+.pc-rule { width: 100%; margin: 22px 0; border: 0; border-top: 1px solid var(--pc-line); }
+
+/* Features */
+.pc-included-label { color: var(--pc-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.pc-features { display: grid; gap: 11px; margin: 14px 0 0; padding: 0; list-style: none; }
+.pc-features li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; font-size: 14px; line-height: 1.45; }
+.pc-check { display: grid; place-items: center; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; background: var(--pc-wash); color: var(--pc-teal); }
+.pc-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: var(--pc-save-wash); color: var(--pc-save); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; vertical-align: 1px; }
+
+/* ---------- Featured card: Popular ---------- */
+.pc-card--popular {
+  z-index: 1; margin-top: -18px; padding-top: 44px; padding-bottom: 34px;
+  border-color: transparent; color: var(--pc-on-night);
+  background:
+    radial-gradient(120% 70% at 100% 0%, rgba(111, 218, 168, .2), transparent 55%),
+    radial-gradient(90% 60% at 0% 100%, rgba(21, 103, 91, .55), transparent 60%),
+    linear-gradient(165deg, var(--pc-night-2) 0%, var(--pc-night) 70%);
+  box-shadow: 0 0 0 1px rgba(111, 218, 168, .28), 0 34px 70px -30px rgba(16, 37, 31, .75), 0 12px 24px -16px rgba(16, 37, 31, .5);
+}
+.pc-card--popular:hover { transform: translateY(-6px); border-color: transparent; box-shadow: 0 0 0 1px rgba(111, 218, 168, .45), 0 40px 80px -30px rgba(16, 37, 31, .8), 0 12px 24px -16px rgba(16, 37, 31, .5); }
+
+.pc-badge {
+  position: absolute; top: -15px; left: 50%; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  padding: 7px 15px; border-radius: 999px; background: var(--pc-lime); color: var(--pc-night);
+  font-size: 11.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  box-shadow: 0 8px 20px -8px rgba(16, 37, 31, .55);
+}
+
+.pc-card--popular .pc-tagline,
+.pc-card--popular .pc-terms,
+.pc-card--popular .pc-assure,
+.pc-card--popular .pc-included-label,
+.pc-card--popular .pc-minutes-sub { color: var(--pc-on-night-muted); }
+.pc-card--popular .pc-was { color: rgba(226, 238, 228, .6); text-decoration-color: rgba(255, 160, 150, .8); }
+.pc-card--popular .pc-amount { font-size: 56px; color: #fff; }
+.pc-card--popular .pc-save { background: rgba(111, 218, 168, .16); color: var(--pc-lime); }
+.pc-card--popular .pc-minutes-panel { background: rgba(255, 255, 255, .07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
+.pc-card--popular .pc-minutes strong { color: var(--pc-lime); }
+.pc-card--popular .pc-rate { background: rgba(111, 218, 168, .14); color: var(--pc-lime); box-shadow: none; }
+.pc-card--popular .pc-rule { border-top-color: rgba(255, 255, 255, .12); }
+.pc-card--popular .pc-check { background: rgba(111, 218, 168, .16); color: var(--pc-lime); }
+.pc-card--popular .pc-tag { background: rgba(111, 218, 168, .16); color: var(--pc-lime); }
+.pc-card--popular .pc-current { background: rgba(111, 218, 168, .14); color: var(--pc-lime); }
+
+.pc-card--popular .pc-button { background: var(--pc-lime); color: var(--pc-night); font-weight: 800; box-shadow: 0 10px 26px -12px rgba(111, 218, 168, .75); }
+.pc-card--popular .pc-button:hover:not(:disabled) { background: var(--pc-lime-hover); box-shadow: 0 14px 30px -12px rgba(111, 218, 168, .9); }
+.pc-card--popular .pc-button:focus-visible { outline-color: #fff; }
+/* Soft light sweep that draws the eye to the main CTA. */
+.pc-card--popular .pc-button::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, .55) 50%, transparent 65%);
+  transform: translateX(-120%); animation: pc-sheen 3.6s var(--pc-ease) 1.2s infinite;
+}
+@keyframes pc-sheen { 0% { transform: translateX(-120%); } 45%, 100% { transform: translateX(120%); } }
+
+/* ---------- Free strip ---------- */
+.pc-free { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 1100px; margin: 30px auto 0; padding: 18px 24px; border: 1px dashed #c9d3c6; border-radius: 16px; background: var(--surface, #fff); color: var(--pc-ink); }
+.pc-free p { font-size: 15px; }
+.pc-free-link { display: inline-flex; flex: none; align-items: center; gap: 6px; color: var(--pc-teal); font-weight: 700; text-decoration: none; }
+.pc-free-link:hover { text-decoration: underline; }
+
+@media (max-width: 900px) {
+  .pc-grid { grid-template-columns: minmax(0, 1fr); max-width: 460px; gap: 34px; padding-top: 16px; }
+  /* Lead with the plan most people should buy. */
+  .pc-card--popular { order: -1; margin-top: 0; }
+  .pc-tagline { min-height: 0; }
+  .pc-free { flex-direction: column; align-items: flex-start; }
+}
+@media (max-width: 380px) {
+  .pc-card { padding-left: 20px; padding-right: 20px; }
+  .pc-amount, .pc-card--popular .pc-amount { font-size: 44px; }
+  .pc-minutes strong { font-size: 38px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pc-card, .pc-card .pc-button, .pc-card .pc-button svg { transition: none; }
+  .pc-card:hover, .pc-card--popular:hover { transform: none; }
+  .pc-card--popular .pc-button::after { animation: none; display: none; }
+}

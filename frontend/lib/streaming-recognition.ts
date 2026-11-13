@@ -53,7 +53,9 @@ export class StreamingRecognition {
     try {
       // Construct synchronously in Start's gesture so Android/iOS can grant capture.
       this.capture = new AudioCapture("microphone", packet => this.packet(packet), () => this.fail("Microphone capture was interrupted. Restart the session."), { enhanced: true });
-      void this.capture.ready.then(() => this.connect()).catch(() => this.fail("Microphone access failed. Allow microphone access and restart."));
+      void this.capture.ready.catch(() => this.fail("Microphone access failed. Allow microphone access and restart."));
+      // Fetch the speech token and open the socket while the microphone starts; audio queues until setup completes.
+      void this.connect();
     } catch { this.fail("Microphone capture could not start. Check browser permissions."); }
   }
 
@@ -115,8 +117,12 @@ export class StreamingRecognition {
         this.connected = true; this.connecting = false; this.connectedAt = Date.now();
         if (this.handshake) clearTimeout(this.handshake); this.handshake = null;
         this.pump(); if (this.stopped) return;
-        this.resolveReady?.(); this.resolveReady = null; this.rejectReady = null;
-        this.onStatus("Streaming microphone active. Speech appears as it is heard; quiet input is amplified.");
+        // Ready means both halves are live: the socket (now) and the microphone (may still be starting).
+        void (this.capture?.ready ?? Promise.resolve()).then(() => {
+          if (this.stopped || !this.resolveReady) return;
+          this.resolveReady(); this.resolveReady = null; this.rejectReady = null;
+          this.onStatus("Streaming microphone active. Speech appears as it is heard; quiet input is amplified.");
+        }, () => undefined);
         // Renew at a quiet boundary before the provider's ten-minute connection limit.
         this.rotation = setInterval(() => this.rotate(), 1000);
         this.deadline = setTimeout(() => this.fail("The speech connection reached its time limit during continuous audio. Restart the session to continue."), 9.5 * 60000);
@@ -166,9 +172,9 @@ export class StreamingRecognition {
   private pump(): void {
     if (this.stopped || !this.connected || this.pumpTimer || !this.queue.length) return;
     if (Date.now() - this.queue[0].at > 6000) { this.fail("The speech connection cannot keep up with microphone audio. Restart the session."); return; }
-    // Yield between buffered startup frames so a normal TLS socket can drain.
+    // Send the startup backlog in small batches (not one frame per tick) while the socket keeps up.
     // Later microphone frames join the same queue and cannot overtake them.
-    if (this.socket && this.socket.bufferedAmount <= 64000) this.send(this.queue.shift()!);
+    for (let sent = 0; sent < 10 && this.queue.length && !this.stopped && this.socket && this.socket.bufferedAmount <= 64000; sent++) this.send(this.queue.shift()!);
     if (!this.stopped && this.queue.length) this.pumpTimer = setTimeout(() => { this.pumpTimer = null; this.pump(); }, 20);
   }
 

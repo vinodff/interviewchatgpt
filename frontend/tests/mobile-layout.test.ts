@@ -43,3 +43,13 @@ describe("mobile live answer split", () => {
     expect(displayedAnswerHeight(70, null)).toBe(70);
   });
 });
+
+describe("code answers get more room on phones", () => {
+  it("raises the answer area to at least 60% for code without lowering a larger preference", async () => {
+    const { answerHeightFor, CODE_ANSWER_HEIGHT } = await import("@/lib/mobile-live-layout");
+    expect(CODE_ANSWER_HEIGHT).toBe(60);
+    expect(answerHeightFor(30, true)).toBe(60);
+    expect(answerHeightFor(70, true)).toBe(70);
+    expect(answerHeightFor(30, false)).toBe(30);
+  });
+});

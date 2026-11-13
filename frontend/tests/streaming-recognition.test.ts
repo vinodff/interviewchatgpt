@@ -76,7 +76,8 @@ describe("continuous streaming recognition", () => {
     const recognition = new StreamingRecognition(vi.fn(), vi.fn()); recognition.onerror = vi.fn(); recognition.start();
     for (let i = 0; i < 25; i++) mocks.packet?.(frame(20 + i));
     await vi.advanceTimersByTimeAsync(0); const socket = Socket.instances.at(-1)!; socket.onopen?.(); socket.message({ setupComplete: {} }); await recognition.ready;
-    expect(socket.send).toHaveBeenCalledTimes(2); mocks.packet?.(frame(100));
+    // Setup plus the first batch of 10 backlog frames go out at once; the rest follow on the next ticks.
+    expect(socket.send).toHaveBeenCalledTimes(11); mocks.packet?.(frame(100));
     await vi.advanceTimersByTimeAsync(520); expect(socket.send).toHaveBeenCalledTimes(27); expect(recognition.onerror).not.toHaveBeenCalled(); recognition.stop();
   });
   it("renews at a quiet boundary without releasing hardware or replaying old audio", async () => {
@@ -126,5 +127,19 @@ describe("continuous streaming recognition", () => {
     await vi.advanceTimersByTimeAsync(8 * 60000); expect(Socket.instances).toHaveLength(1); expect(socket.close).not.toHaveBeenCalled();
     socket.message({ serverContent: { inputTranscription: { text: "Database means?" } } }); await vi.advanceTimersByTimeAsync(1000);
     expect(Socket.instances).toHaveLength(2); recognition.stop();
+  });
+});
+
+describe("parallel startup", () => {
+  it("requests the speech token while the microphone is still starting and is ready only when both are live", async () => {
+    let micReady!: () => void; mocks.captureReady = new Promise<void>(resolve => { micReady = resolve; });
+    const recognition = new StreamingRecognition(vi.fn(), vi.fn()); recognition.onerror = vi.fn(); recognition.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.api).toHaveBeenCalledWith("/live/speech-ticket", expect.anything());
+    const socket = Socket.instances.at(-1)!; socket.onopen?.(); socket.message({ setupComplete: {} });
+    let ready = false; void recognition.ready.then(() => { ready = true; });
+    await vi.advanceTimersByTimeAsync(0); expect(ready).toBe(false);
+    micReady(); await vi.advanceTimersByTimeAsync(0); expect(ready).toBe(true);
+    recognition.stop();
   });
 });

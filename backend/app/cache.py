@@ -10,25 +10,50 @@ class Coordination:
     """Redis in production; shared PostgreSQL or explicitly process-local coordination for development."""
 
     def __init__(self):
-        self.redis = (
+        self._redis_url = (
             None
             if (settings.redis_url == "memory://" or settings.coordination_backend == "postgres")
-            else Redis.from_url(
-                settings.redis_url,
+            else settings.redis_url
+        )
+        self._redis = None
+        self._redis_loop = None
+        self.memory: dict[str, tuple[str, float]] = {}
+        self._lock: asyncio.Lock | None = None
+        self._lock_loop = None
+        self._postgres = None
+
+    @property
+    def redis(self):
+        """One client per event loop.
+
+        A redis.asyncio client owns a connection pool whose futures belong to the loop
+        that opened the sockets. Holding a single client across TestClient threads,
+        asyncio.run() helpers, or a server reload reuses those futures from another
+        loop and raises "attached to a different loop".
+        """
+        if self._redis_url is None:
+            return None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not self._redis_loop:
+            self._redis = Redis.from_url(
+                self._redis_url,
                 decode_responses=True,
                 socket_connect_timeout=3,
                 socket_timeout=5,
                 health_check_interval=30,
             )
-        )
-        self.memory: dict[str, tuple[str, float]] = {}
-        self._lock: asyncio.Lock | None = None
-        self._postgres = None
+            self._redis_loop = loop
+        return self._redis
 
     @property
     def lock(self) -> asyncio.Lock:
-        if self._lock is None:
+        # asyncio.Lock binds to the loop that created it, so it is per-loop too.
+        if self._lock is None or self._lock_loop is not asyncio.get_running_loop():
             self._lock = asyncio.Lock()
+            self._lock_loop = asyncio.get_running_loop()
         return self._lock
 
     @property

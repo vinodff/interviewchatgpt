@@ -1,95 +1,50 @@
-import type { PlanId } from "./plans";
+import type { PaidPlanId } from "./plans";
 
-export interface PlanFeatureItem {
+export interface PlanFeature {
   text: string;
-  highlight?: boolean;
   tag?: string;
 }
 
 export interface PlanDetail {
   tagline: string;
+  /** One short line under the minutes that makes the allowance concrete. */
+  highlight: string;
+  cta: string;
+  /** Headline badge: the plan we steer people towards. Only one plan should have it. */
   badge?: string;
-  badgeColor?: string;
-  features: PlanFeatureItem[];
+  /** Small secondary label, e.g. the cheapest per-minute pack. */
+  ribbon?: string;
 }
 
-export function getFeatureTagClass(tag?: string): string {
-  if (!tag) return "";
-  switch (tag.toLowerCase()) {
-    case "resume":
-      return "feature-tag-blue";
-    case "knowledge":
-      return "feature-tag-amber";
-    case "think":
-      return "feature-tag-purple";
-    case "unlimited":
-      return "feature-tag-emerald";
-    case "never expire":
-      return "feature-tag-rose";
-    default:
-      return "feature-tag-default";
-  }
-}
-
-export const PLAN_DETAILS: Record<PlanId, PlanDetail> = {
-  free: {
-    tagline: "Free tier to try live AI interview assistance.",
-    badge: "FREE TIER",
-    badgeColor: "#475569",
-    features: [
-      { text: "2 live interview minutes / month" },
-      { text: "1 Resume upload & ATS keyword scanning" },
-      { text: "Basic Knowledge Base (up to 3 documents)" },
-      { text: "Real-time speech-to-text transcription" },
-      { text: "Standard AI answer generation" },
-      { text: "STAR method interview coaching" },
-      { text: "Community & standard support" },
-    ],
-  },
+/** Card copy per paid pack. Every pack unlocks the same features; only the minutes differ. */
+export const PLAN_DETAILS: Record<PaidPlanId, PlanDetail> = {
   starter: {
-    tagline: "Great for your upcoming 1–2 interview rounds.",
-    badge: "QUICK PREP",
-    badgeColor: "#2563eb",
-    features: [
-      { text: "20 live interview minutes", highlight: true },
-      { text: "Unlimited Resume Uploads & Project Grounding", highlight: true, tag: "Resume" },
-      { text: "Custom Knowledge Base (upload job descriptions, company briefs & notes)", highlight: true, tag: "Knowledge" },
-      { text: "AI \"Think\" & Deep Reasoning Mode", highlight: true, tag: "Think" },
-      { text: "Real-time STAR-method structured answers" },
-      { text: "Dual audio capture (mic + interviewer voice)" },
-      { text: "Fast Gemini 3.8 Flash inference" },
-      { text: "Priority email support" },
-    ],
+    tagline: "Try it on your next real interview.",
+    highlight: "Enough for one focused round",
+    cta: "Get 20 minutes",
   },
   pro: {
-    tagline: "Recommended for active job seekers & complete interview loops.",
-    badge: "★ MOST POPULAR",
-    badgeColor: "#0f766e",
-    features: [
-      { text: "45 live interview minutes (covers 3–4 interview rounds)", highlight: true },
-      { text: "Unlimited Knowledge Base & Company Research files", highlight: true, tag: "Unlimited" },
-      { text: "Unlimited Resume Uploads & Versions (tailored per job role)", highlight: true, tag: "Resume" },
-      { text: "Advanced AI \"Think\" & Strategy Engine (anticipates follow-up questions)", highlight: true, tag: "Think" },
-      { text: "Multi-Turn Interview Memory & Context Retention" },
-      { text: "Role Presets: SWE, System Design, Behavioral, Frontend, Backend, PM" },
-      { text: "Real-Time AI Whisper Suggestions & Code Snippet Hints" },
-      { text: "Ultra-low latency streaming AI answers" },
-      { text: "Priority 24/7 dedicated assistance" },
-    ],
+    tagline: "A full hour of help across your whole interview loop.",
+    highlight: "One full hour, 3× the Starter pack",
+    cta: "Get 60 minutes",
+    badge: "Most popular",
   },
   value: {
-    tagline: "Full coverage for senior loops, executive rounds & intensive preparation.",
-    badge: "💎 ULTIMATE VALUE",
-    badgeColor: "#7c3aed",
-    features: [
-      { text: "120 live interview minutes (2 full hours of live AI assistance!)", highlight: true },
-      { text: "Permanent validity — purchased minutes never expire", highlight: true, tag: "Never Expire" },
-      { text: "Full Unlimited Knowledge Base & Resume Document Vault", highlight: true, tag: "Knowledge" },
-      { text: "Deepest AI Reasoning (\"Think Max\") for Architecture, LeetCode & Trade-offs", highlight: true, tag: "Think" },
-      { text: "Mock Interview History & Post-Session Performance Reports" },
-      { text: "Staff / Principal / Engineering Manager specialized presets" },
-      { text: "Guaranteed zero-queue priority model access" },
-      { text: "VIP direct onboarding & concierge support" },
-    ],
+    tagline: "For an active job hunt with many interviews.",
+    highlight: "Two and a half hours of live help",
+    cta: "Get 150 minutes",
+    ribbon: "Lowest per minute",
   },
 };
+
+/** Shown on every card. Only list features the product actually ships to every paid user. */
+export const INCLUDED_FEATURES: readonly PlanFeature[] = [
+  { text: "Real-time answers while the interviewer speaks" },
+  { text: "Hears you and the interviewer (mic + tab audio on desktop)" },
+  { text: "Answers grounded in your resume and projects" },
+  { text: "Knowledge base for job descriptions and company notes" },
+  { text: "Think mode for harder technical questions", tag: "Think" },
+  { text: "Role presets: SWE, System Design, PM, Behavioral" },
+  { text: "STAR-structured behavioural answers" },
+  { text: "Minutes never expire", tag: "No expiry" },
+];

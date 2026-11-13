@@ -23,3 +23,8 @@ android/local.properties
 *.keystore
 
 .vercel/
+.gstack/
+
+# Local credential exports (never commit)
+APIKey.csv
+*.csv.key

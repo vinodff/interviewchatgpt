@@ -73,7 +73,11 @@ describe("legacy generation and backend routing", () => {
     const response = legacyGenerate(); expect(response.status).toBe(410); expect(await response.json()).toEqual({ detail: expect.stringContaining("disabled") });
     expect(response.headers.get("Cache-Control")).toBe("no-store"); expect(fetchMock).not.toHaveBeenCalled();
   });
-  it("always rewrites API traffic to the configured backend in production as well as development", async () => {
-    const rewrites = await config.rewrites?.(); expect(rewrites).toEqual([{ source: "/api/:path*", destination: `${(process.env.BACKEND_INTERNAL_URL || "http://127.0.0.1:8000").replace(/\/$/, "")}/api/:path*` }]);
+  it("rewrites API traffic to a configured backend, and leaves it to Next's routes when none is configured", async () => {
+    vi.stubEnv("VERCEL", ""); vi.stubEnv("BACKEND_INTERNAL_URL", "http://127.0.0.1:8001/");
+    expect(await config.rewrites?.()).toEqual([{ source: "/api/:path*", destination: "http://127.0.0.1:8001/api/:path*" }]);
+    vi.stubEnv("BACKEND_INTERNAL_URL", "");
+    expect(await config.rewrites?.()).toEqual([]);
+    vi.unstubAllEnvs();
   });
 });

@@ -88,7 +88,7 @@ describe("plan minutes and free trial timing calculation", () => {
     expect(user.credit_minutes_remaining).toBe(20);
   });
 
-  it("adds the full 45 minutes for Pro plan (total 47m), so after 2m free trial user gets 45m remaining", async () => {
+  it("adds the full 60 minutes for Pro plan (total 62m), so after 2m free trial user gets 60m remaining", async () => {
     const mockDb = makeMockDb(120); // 2 minutes used during free trial
     const row: UserRow = {
       id: "usr_1",
@@ -102,17 +102,17 @@ describe("plan minutes and free trial timing calculation", () => {
       preferences: {},
       stripe_customer_id: null,
       cf_customer_id: null,
-      credit_seconds: 2700, // 45 minutes purchased
+      credit_seconds: 3600, // 60 minutes purchased
     };
 
     const user = await userShape(mockDb as unknown as Parameters<typeof userShape>[0], row);
-    expect(user.minute_limit).toBe(47);
+    expect(user.minute_limit).toBe(62);
     expect(user.minutes_used).toBe(2);
-    expect((user.minute_limit as number) - user.minutes_used).toBe(45);
-    expect(user.credit_minutes_remaining).toBe(45);
+    expect((user.minute_limit as number) - user.minutes_used).toBe(60);
+    expect(user.credit_minutes_remaining).toBe(60);
   });
 
-  it("adds the full 120 minutes for Value plan (total 122m), so after 2m free trial user gets 120m remaining", async () => {
+  it("adds the full 150 minutes for Value plan (total 152m), so after 2m free trial user gets 150m remaining", async () => {
     const mockDb = makeMockDb(120); // 2 minutes used during free trial
     const row: UserRow = {
       id: "usr_1",
@@ -126,14 +126,14 @@ describe("plan minutes and free trial timing calculation", () => {
       preferences: {},
       stripe_customer_id: null,
       cf_customer_id: null,
-      credit_seconds: 7200, // 120 minutes purchased
+      credit_seconds: 9000, // 150 minutes purchased
     };
 
     const user = await userShape(mockDb as unknown as Parameters<typeof userShape>[0], row);
-    expect(user.minute_limit).toBe(122);
+    expect(user.minute_limit).toBe(152);
     expect(user.minutes_used).toBe(2);
-    expect((user.minute_limit as number) - user.minutes_used).toBe(120);
-    expect(user.credit_minutes_remaining).toBe(120);
+    expect((user.minute_limit as number) - user.minutes_used).toBe(150);
+    expect(user.credit_minutes_remaining).toBe(150);
   });
 
   it("preserves unused free trial if user purchases before using free minutes (total 22m remaining)", async () => {

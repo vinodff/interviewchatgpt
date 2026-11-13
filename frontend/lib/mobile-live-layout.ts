@@ -2,6 +2,12 @@ export const ANSWER_HEIGHT_DEFAULT = 30;
 export const ANSWER_HEIGHT_MIN = 15;
 export const ANSWER_HEIGHT_MAX = 70;
 export const ANSWER_HEIGHT_KEY = "interviewpilot.live.answer-height";
+/** Code needs room to read: a code answer opens the answer area to at least this much. */
+export const CODE_ANSWER_HEIGHT = 60;
+
+export function answerHeightFor(preferred: number, isCodeAnswer: boolean) {
+  return isCodeAnswer ? Math.max(clampAnswerHeight(preferred), CODE_ANSWER_HEIGHT) : clampAnswerHeight(preferred);
+}
 
 export function clampAnswerHeight(value: number) {
   return Number.isFinite(value) ? Math.min(ANSWER_HEIGHT_MAX, Math.max(ANSWER_HEIGHT_MIN, Math.round(value))) : ANSWER_HEIGHT_DEFAULT;

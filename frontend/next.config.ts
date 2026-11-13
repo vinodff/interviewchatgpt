@@ -1,6 +1,5 @@
 import type { NextConfig } from "next";
 
-const backend = (process.env.BACKEND_INTERNAL_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 const config: NextConfig = {
   // Account mode is forced for this deployment, ignoring any dashboard
   // NEXT_PUBLIC_WORKSPACE_MODE=browser setting: that setting was still
@@ -15,11 +14,25 @@ const config: NextConfig = {
   experimental: { cpus: 1, workerThreads: true },
   async rewrites() {
     // Route handlers own proxying so Set-Cookie and backend failures are preserved.
-    if (process.env.VERCEL || process.env.NEXT_PUBLIC_WORKSPACE_MODE === "browser") return [];
+    // Only proxy /api to a backend that is actually configured; otherwise Next's own routes serve it, as on Vercel.
+    const backend = (process.env.BACKEND_INTERNAL_URL || "").replace(/\/$/, "");
+    if (!backend || process.env.VERCEL || process.env.NEXT_PUBLIC_WORKSPACE_MODE === "browser") return [];
     return [{ source: "/api/:path*", destination: `${backend}/api/:path*` }];
   },
   async redirects() {
+    // Common guessed URLs that used to 404.
+    const aliases = [
+      { source: "/pricing", destination: "/plans" },
+      { source: "/login", destination: "/interview" },
+      { source: "/signin", destination: "/interview" },
+      { source: "/signup", destination: "/interview?signup=1" },
+      { source: "/register", destination: "/interview?signup=1" },
+      { source: "/dashboard", destination: "/interview?view=overview" },
+      { source: "/app", destination: "/interview?view=overview" },
+      { source: "/live", destination: "/interview?view=live" },
+    ].map(alias => ({ ...alias, permanent: false }));
     return [
+      ...aliases,
       {
         source: "/:path*",
         has: [

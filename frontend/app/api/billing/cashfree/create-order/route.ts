@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClientSafe, verifySupabaseUser } from "@/lib/supabase-server";
+import { PAID_PLANS, type PaidPlanId } from "@/lib/plans";
 
 const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID || "";
 const CASHFREE_SECRET =
@@ -14,40 +15,30 @@ const BASE_URL =
     ? "https://api.cashfree.com/pg"
     : "https://sandbox.cashfree.com/pg";
 
-const PLAN_AMOUNTS: Record<string, { amount: number; name: string; minutes: number }> = {
-  starter: { amount: 100, name: "Starter", minutes: 20 },
-  pro: { amount: 200, name: "Popular", minutes: 45 },
-  value: { amount: 500, name: "Value", minutes: 120 },
-};
+const PLAN_AMOUNTS: Record<string, { amount: number; name: string; minutes: number }> = Object.fromEntries(
+  (Object.keys(PAID_PLANS) as PaidPlanId[]).map(id => [id, { amount: PAID_PLANS[id].amountInr, name: PAID_PLANS[id].name, minutes: PAID_PLANS[id].minutes }])
+);
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const planId = (body.plan || "starter") as string;
-    const planInfo = PLAN_AMOUNTS[planId];
+    const planInfo = Object.hasOwn(PLAN_AMOUNTS, planId) ? PLAN_AMOUNTS[planId] : undefined;
     if (!planInfo) {
       return NextResponse.json({ detail: "Invalid plan selected." }, { status: 400 });
     }
 
-    // Try to get authenticated user, or fall back to payload / anonymous
-    let userId = (body.customer_id as string) || `usr_${Math.random().toString(36).substring(2, 10)}`;
-    let userEmail = (body.email as string) || "candidate@interviewwin.com";
-    let userName = "InterviewWin Candidate";
+    // Identity must come from the verified token only. A client-supplied customer_id
+    // would let an anonymous caller attribute an order to, and overwrite data on,
+    // another account through the service-role client below.
+    const authUser = await verifySupabaseUser(request);
+    const userId = authUser.id;
+    const userEmail = authUser.email;
+    const userName = authUser.name || "InterviewWin Candidate";
     let userPhone = "9876543210";
 
     if (body.phone && /^[6-9]\d{9}$/.test(String(body.phone).replace(/\D/g, "").slice(-10))) {
       userPhone = String(body.phone).replace(/\D/g, "").slice(-10);
-    }
-
-    try {
-      const authUser = await verifySupabaseUser(request);
-      if (authUser?.id) {
-        userId = authUser.id;
-        userEmail = authUser.email || userEmail;
-        userName = authUser.name || userName;
-      }
-    } catch {
-      // Unauthenticated checkout or browser token, allow continuation
     }
 
     const cleanCustId = `cust_${userId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 20)}`;
@@ -118,7 +109,7 @@ export async function POST(request: NextRequest) {
           created_at: new Date().toISOString(),
         });
 
-        if (userId && !userId.startsWith("usr_") && userPhone) {
+        if (userPhone) {
           await db.from("users").update({ phone: userPhone }).eq("id", userId);
         }
       }

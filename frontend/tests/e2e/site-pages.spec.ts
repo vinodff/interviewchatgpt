@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 const pages = [
   ["features", "Less friction. More presence."],
   ["how-it-works", "Bring your work. Find your words."],
-  ["plans", "A plan for your next interview."],
+  ["plans", "Pay once. Use it when the call comes."],
   ["about", "Good work deserves clear words."],
   ["help", "A little help, right here."],
   ["contact", "Let’s find the next step."],

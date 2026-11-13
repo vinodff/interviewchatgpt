@@ -77,8 +77,15 @@ dialog.modal { max-width:620px; width:calc(100% - 32px); max-height:calc(100vh -
 .live-answer-region { grid-area:answer; border-top:0; border-bottom:0; border-radius:0; max-height:min(54dvh,560px); overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-gutter:stable; }.live-workspace .answer-evidence { grid-area:evidence; border:1px solid #d5dfcf; border-top:1px solid #e8eedf; border-radius:0 0 9px 9px; }
 .reader-current-word { text-decoration-line:underline; text-decoration-color:#15675b; text-decoration-thickness:2px; text-underline-offset:.22em; text-decoration-skip-ink:auto; }
 .answer-code-fence { display:none; }
-.answer-code-block { max-width:100%; margin:12px 0; padding:14px 16px; border:1px solid #dce4d8; border-radius:6px; background:#f4f7f1; color:#203631; font-family:Consolas,"Cascadia Code","Courier New",monospace; font-size:14px; line-height:1.7; white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal; tab-size:4; text-align:left; }
-.answer-code-block code { font:inherit; white-space:inherit; }
+.answer-code { max-width:100%; min-width:0; margin:4px 0 14px; border:1px solid #d6e0d2; border-radius:10px; background:#f4f7f1; overflow:hidden; }
+.answer-code-head { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:34px; padding:4px 6px 4px 12px; border-bottom:1px solid #e1e8dc; background:#eaf0e6; color:#4b6555; font:600 11px/1.2 ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace; letter-spacing:.06em; text-transform:uppercase; }
+.answer-code-copy { min-height:28px; padding:2px 10px; border:1px solid #c9d6c6; border-radius:999px; background:#fff; color:#15675b; font:600 11px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; letter-spacing:.02em; text-transform:none; cursor:pointer; }
+.answer-code-copy:hover { background:#f0f6f1; }
+.answer-code-head::before { content:attr(data-label); }
+.answer-code-copy::after { content:"Copy"; }
+.answer-code-copy[data-copied="true"]::after { content:"Copied"; }
+.answer-code-block { margin:0; padding:12px 14px 14px; color:#1d332c; font-family:ui-monospace,"SF Mono","Roboto Mono","Cascadia Code",Menlo,Consolas,"Courier New",monospace; font-size:calc(var(--answer-font-size,17px) * .82); line-height:1.6; white-space:pre; overflow-x:auto; overflow-wrap:normal; word-break:normal; letter-spacing:0; word-spacing:0; tab-size:4; text-align:left; -webkit-overflow-scrolling:touch; overscroll-behavior-x:contain; }
+.answer-code-block code { font:inherit; white-space:inherit; letter-spacing:0; word-spacing:0; }
 .live-workspace .transcript-panel { grid-area:transcript; margin-top:20px; }.live-collapsible>summary { display:none; }
 .live-options-panel { padding:0 20px 20px; }.live-options-panel .panel-heading { margin:0 -20px; padding:19px 20px; }
 .preference-fields { display:flex; flex-direction:column; gap:16px; border:0; padding:0; margin:0; min-width:0; }.preference-help { font-size:12px; line-height:1.7; color:var(--muted); }
@@ -113,7 +120,7 @@ dialog.modal { max-width:620px; width:calc(100% - 32px); max-height:calc(100vh -
   .mobile-live .main-content { height:100%; padding:0; overflow:hidden; outline-offset:-3px; }
   .mobile-live .main-content>div:not([hidden]) { height:100%; }
   .mobile-live .main-footer { display:none; }
-  .mobile-live .sidebar,.mobile-live .sidebar-backdrop { top:var(--mobile-answer-top,30dvh); bottom:auto; height:calc(var(--live-viewport-height,100dvh) - var(--mobile-answer-top,30dvh)); }
+  .mobile-live .sidebar,.mobile-live .sidebar-backdrop { top:0; bottom:auto; height:var(--live-viewport-height,100dvh); }
   .mobile-live .sidebar { width:min(320px,100%); padding:16px 16px max(16px,env(safe-area-inset-bottom)); }
   .mobile-live .sidebar-brand { padding-bottom:16px; }.mobile-live .workspace-label { padding:12px 5px; }.mobile-live .nav-label { margin-top:16px; }.mobile-live .sidebar-bottom { padding-top:16px; }
   .mobile-live .live-workspace { height:var(--live-viewport-height,100dvh); min-height:0; width:100%; overflow:hidden; grid-template-columns:minmax(0,1fr); grid-template-rows:var(--answer-height,30%) minmax(0,1fr); grid-template-areas:none; gap:0; align-items:stretch; }
@@ -148,7 +155,6 @@ dialog.modal { max-width:620px; width:calc(100% - 32px); max-height:calc(100vh -
   .answer-height-control { display:grid; grid-template-columns:1fr auto; margin-top:20px; padding-top:15px; border-top:1px solid var(--line); font-size:12px; font-weight:600; }.answer-height-control input { grid-column:1/-1; width:100%; height:44px; accent-color:var(--teal); }
   .mobile-live .memory-details summary,.mobile-live .evidence summary,.mobile-live .evidence a { min-height:44px; }.mobile-live .evidence a { display:inline-flex; align-items:center; }
 }
-@media(max-width:360px) { .mobile-live-brand>svg { display:none; }.mobile-live-brand strong { font-size:12px; }.mobile-live-toolbar nav .button { min-width:44px; } }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
 /* Answer display: adjustable text size, fonts, and easy-read themes (mobile + desktop). */
 .answer-text { font-size:var(--answer-font-size,16px); }
@@ -158,7 +164,7 @@ dialog.modal { max-width:620px; width:calc(100% - 32px); max-height:calc(100vh -
 .answer-text[data-answer-theme="easy"] .reader-current-word { background:#ffe45e; text-decoration:none; border-radius:3px; padding:0 2px; }
 .answer-text[data-answer-theme="contrast"] { background:#0f1f16; color:#f4fff4; }
 .answer-text[data-answer-theme="contrast"] .reader-current-word { background:#ffe45e; color:#0f1f16; text-decoration:none; border-radius:3px; padding:0 2px; }
-.answer-text[data-answer-theme="contrast"] .answer-code-block { background:#1c2f22; color:#eaffea; border-color:#3a5540; }
+.answer-text[data-answer-theme="contrast"] .answer-code { background:#1c2f22; border-color:#3a5540; }.answer-text[data-answer-theme="contrast"] .answer-code-block { color:#eaffea; }.answer-text[data-answer-theme="contrast"] .answer-code-head { background:#162619; color:#bfe3c6; border-color:#3a5540; }
 .preference-display { display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--line); padding-top:15px; margin-top:2px; }
 .answer-size-control { display:grid; grid-template-columns:1fr auto; font-size:12px; font-weight:600; }
 .answer-size-control output { color:var(--muted); font-weight:400; }
@@ -1347,4 +1353,50 @@ dialog.modal { max-width:620px; width:calc(100% - 32px); max-height:calc(100vh -
   font-size: 11px;
   color: #556b4f;
   margin-top: 2px;
+}
+
+/* Sidebar home links */
+.sidebar-home { display:inline-flex; color:inherit; text-decoration:none; border-radius:6px; }
+.sidebar a.nav-item { text-decoration:none; }
+.sidebar-brand-actions { align-items:center; gap:2px; }
+.breadcrumb-home { color:inherit; text-decoration:none; }
+.breadcrumb-home:hover { color:var(--teal); text-decoration:underline; }
+.main-footer a { color:inherit; }
+
+/* Mobile live: answer on top, then the resize handle, then one dark control dock (status, Start / End, menu) */
+@media(max-width:760px) {
+  .mobile-live .answer-resize-handle { height:36px; min-height:36px; gap:8px; background:#eef2ea; border-bottom:0; color:#5b6f61; font-size:11px; letter-spacing:.2px; }
+  .mobile-live-dock { display:flex; flex:none; align-items:center; gap:10px; min-height:62px; padding:9px max(8px,env(safe-area-inset-right)) 9px max(12px,env(safe-area-inset-left)); background:#1c3832; color:#f2f7f3; box-shadow:0 6px 16px -10px rgba(14,34,28,.6); position:relative; z-index:1; }
+  .mobile-live-brand { display:grid; flex:none; place-items:center; width:40px; height:40px; border-radius:11px; background:rgba(255,255,255,.08); color:#9fdcc1; text-decoration:none; transition:background .16s; }
+  .mobile-live-brand:hover,.mobile-live-brand:focus-visible { background:rgba(255,255,255,.16); }
+  .mobile-live-brand>svg { color:#9fdcc1; }
+  .mobile-live-title { flex:1; min-width:0; }
+  .mobile-live-title h1 { font-size:15px; font-weight:700; letter-spacing:-.2px; line-height:1.2; color:#fff; }
+  .mobile-live-dock .mobile-capture-state { gap:7px; margin-top:4px; font-size:12px; line-height:1.2; color:#b5cbc0; }
+  .mobile-live-dock .mobile-capture-state>span:last-child { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-variant-numeric:tabular-nums; }
+  .mobile-live-dock .waiting-dot { background:#e0b85c; }
+  .mobile-live-dock .mobile-start,.mobile-live-dock .mobile-stop { flex:none; gap:7px; min-height:44px; padding:0 18px; border:0; border-radius:999px; font-size:14px; font-weight:700; letter-spacing:.1px; }
+  .mobile-live-dock .mobile-start { background:#6fdaa8; color:#0c2a20; box-shadow:0 0 0 3px rgba(111,218,168,.18); }
+  .mobile-live-dock .mobile-start:hover:not(:disabled) { background:#8ae4ba; }
+  .mobile-live-dock .mobile-start:disabled { background:rgba(255,255,255,.14); color:rgba(255,255,255,.55); box-shadow:none; opacity:1; }
+  .mobile-live-dock .mobile-stop { background:#e5484d; color:#fff; box-shadow:0 0 0 3px rgba(229,72,77,.22); }
+  .mobile-live-dock .mobile-stop:hover:not(:disabled) { background:#d93a40; }
+  .mobile-live-dock .mobile-live-menu { flex:none; padding:10px; color:#e3ece6; border-radius:11px; }
+  .mobile-live-dock .mobile-live-menu:hover { background:rgba(255,255,255,.1); color:#fff; }
+  /* Before a session the setup comes first; the empty question card is hidden. During a session the question and transcript come first. */
+  .mobile-live .is-idle .live-question-panel { display:none; }
+  .mobile-live .is-idle .capture-panel { order:-1; }
+  .mobile-live .is-idle .capture-panel>summary { pointer-events:none; }
+  .mobile-live .is-idle .capture-panel>summary>svg:last-child { display:none; }
+  .mobile-live .is-live .transcript-panel { order:0; }
+  .mobile-live .is-live .capture-panel { order:1; }
+  .mobile-live .is-live .answer-evidence { order:2; }
+  .mobile-live .is-live .live-options-panel { order:3; }
+  .mobile-live .is-live .context-panel { order:4; }
+}
+
+/* Code answers on phones: edge-to-edge block, compact type that follows the text-size setting */
+@media(max-width:760px) {
+  .mobile-live .answer-code { margin-inline:-10px; border-radius:8px; }
+  .mobile-live .answer-code-block { padding:10px 12px 12px; font-size:clamp(12px, calc(var(--answer-font-size,17px) * .76), 14px); line-height:1.55; }
 }

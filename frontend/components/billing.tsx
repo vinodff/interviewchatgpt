@@ -2,11 +2,8 @@ import { useEffect, useState } from "react";
 import {
   ArrowRight,
   Brain,
-  Check,
   CheckCircle2,
-  Clock,
   CreditCard,
-  Crown,
   Database,
   FileText,
   Lock,
@@ -15,12 +12,17 @@ import {
   Zap,
 } from "lucide-react";
 import { ApiError, messageOf, post } from "@/lib/api";
-import { parsePlans, type PlanCatalog, type PlanId } from "@/lib/plans";
-import { PLAN_DETAILS, getFeatureTagClass } from "@/lib/plan-details";
+import { PAID_PLANS, parsePlans, type PaidPlanId, type Plan, type PlanCatalog, type PlanId } from "@/lib/plans";
+import { PLAN_DETAILS } from "@/lib/plan-details";
 import { useOwnedApi } from "@/lib/use-owned-api";
 import { CashfreeService } from "@/lib/cashfree-service";
 import type { Health, User } from "@/lib/types";
 import { Alert, Button, SectionHeader } from "./ui";
+import { PlanCard } from "./pricing/plan-card";
+
+function isPaidPlan(plan: Plan): plan is Plan & { id: PaidPlanId } {
+  return plan.id !== "free";
+}
 
 
 export function Billing({
@@ -93,13 +95,12 @@ export function Billing({
           isPaid = true;
           const planToUse =
             expectedPlan ||
-            (res.order_amount && res.order_amount >= 500
+            (res.order_amount && res.order_amount >= PAID_PLANS.value.amountInr
               ? "value"
-              : res.order_amount && res.order_amount >= 200
+              : res.order_amount && res.order_amount >= PAID_PLANS.pro.amountInr
               ? "pro"
               : "starter");
-          const minutesGranted =
-            planToUse === "value" ? 120 : planToUse === "pro" ? 45 : 20;
+          const minutesGranted = PAID_PLANS[(planToUse in PAID_PLANS ? planToUse : "starter") as PaidPlanId].minutes;
 
           setSuccess(
             `Payment confirmed! Your ${planToUse.toUpperCase()} plan is now active with ${minutesGranted} minutes.`
@@ -159,8 +160,7 @@ export function Billing({
     if (gateway === "cashfree") {
       try {
         const phoneToUse = customerPhone || phone.trim() || "9876543210";
-        const planAmounts: Record<string, number> = { starter: 100, pro: 200, value: 500 };
-        const amount = planAmounts[plan] || 100;
+        const amount = PAID_PLANS[(plan in PAID_PLANS ? plan : "starter") as PaidPlanId].amountInr;
 
         const order = await CashfreeService.createOrder({
           amount,
@@ -350,128 +350,38 @@ export function Billing({
         </p>
       )}
 
-      {/* 4-Column Responsive Grid */}
-      <div className="account-plan-grid-modern">
-        {catalog?.plans.map((plan) => {
-          const details = PLAN_DETAILS[plan.id];
-          const isSelected = plan.id === selectedPlan;
-          const isCurrent = plan.id === user.plan;
-          const isPopular = plan.id === "pro";
-          const isValue = plan.id === "value";
-
-          const isFree = plan.id === "free";
-          const buttonClass = isPopular
-            ? "plan-button-popular"
-            : isValue
-            ? "plan-button-value"
-            : "plan-button-starter";
-
-          return (
-            <section
-              className={`panel account-plan-card account-plan-${plan.id} ${
-                isPopular ? "account-plan-popular" : ""
-              } ${isValue ? "account-plan-value" : ""} ${
-                plan.id === "starter" ? "account-plan-starter" : ""
-              } ${isFree ? "account-plan-free" : ""} ${
-                isSelected ? "account-plan-selected" : ""
-              } ${isCurrent ? "account-plan-is-current" : ""}`}
+      <div className="pc-section">
+        <div className="pc-grid">
+          {catalog?.plans.filter(isPaidPlan).map((plan) => (
+            <PlanCard
               key={plan.id}
-            >
-              {/* Badge */}
-              {details.badge && (
-                <div
-                  className="plan-badge-top"
-                  style={{ backgroundColor: details.badgeColor }}
-                >
-                  {details.badge}
-                </div>
-              )}
-
-              {/* Top Section with locked heights for perfect horizontal alignment */}
-              <div className="plan-card-body-top">
-                <div className="plan-header">
-                  <div className="plan-name-row">
-                    <h3>{plan.name}</h3>
-                    {isPopular && <Crown size={18} style={{ color: "#d97706" }} />}
+              plan={plan}
+              selected={plan.id === selectedPlan}
+              action={
+                plan.id === user.plan ? (
+                  <div className="pc-current">
+                    <CheckCircle2 size={16} /> Current active plan
                   </div>
-                  <p className="plan-tagline">{details.tagline}</p>
-                </div>
-
-                <div className="account-plan-price-block">
-                  <span className="price-currency">₹</span>
-                  <span className="price-amount">{plan.amount / 100}</span>
-                  <span className="price-period">
-                    {isFree ? " forever" : " / month"}
-                  </span>
-                </div>
-
-                <div className={`plan-minutes-highlight plan-minutes-${plan.id}`}>
-                  <Clock size={15} />
-                  <strong>{plan.minutes} Live Minutes</strong>
-                </div>
-
-                {/* Action Button */}
-                <div className="plan-cta-box">
-                  {isCurrent ? (
-                    <div className="account-plan-current-tag">
-                      <CheckCircle2 size={16} /> Current active plan
-                    </div>
-                  ) : isFree ? (
-                    <div className="account-plan-free-included">
-                      Default free tier included
-                    </div>
-                  ) : (
-                    <Button
-                      className={`plan-button-main ${buttonClass}`}
-                      busy={busy === plan.id}
-                      disabled={!!busy}
-                      onClick={() => {
-                        if (!phone || phone.length < 10) {
-                          setShowPhoneModal(plan.id);
-                        } else {
-                          void handleCheckout(plan.id, phone);
-                        }
-                      }}
-                    >
-                      <Zap size={15} />
-                      <span>Upgrade to {plan.name}</span>
-                    </Button>
-                  )}
-                  <small className="plan-tax-note">
-                    {isFree
-                      ? "Free forever. Upgrade anytime."
-                      : "All prices in INR. Inclusive of all taxes."}
-                  </small>
-                </div>
-              </div>
-
-              {/* Feature List */}
-              <div className="plan-features-section">
-                <div className="plan-features-label">WHAT&apos;S INCLUDED:</div>
-                <ul className="plan-features-list">
-                  {details.features.map((feat, idx) => (
-                    <li
-                      key={idx}
-                      className={feat.highlight ? "feature-item-highlight" : "feature-item"}
-                    >
-                      <span className="feature-check-icon">
-                        <Check size={12} strokeWidth={2.5} />
-                      </span>
-                      <span className="feature-text">
-                        {feat.text}
-                        {feat.tag && (
-                          <span className={`feature-tag-inline ${getFeatureTagClass(feat.tag)}`}>
-                            {feat.tag}
-                          </span>
-                        )}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </section>
-          );
-        })}
+                ) : (
+                  <Button
+                    className="pc-button"
+                    busy={busy === plan.id}
+                    disabled={!!busy}
+                    onClick={() => {
+                      if (!phone || phone.length < 10) {
+                        setShowPhoneModal(plan.id);
+                      } else {
+                        void handleCheckout(plan.id, phone);
+                      }
+                    }}
+                  >
+                    {PLAN_DETAILS[plan.id].cta}
+                  </Button>
+                )
+              }
+            />
+          ))}
+        </div>
       </div>
 
       {/* Phone Number Modal for Instant Checkout */}

@@ -32,7 +32,7 @@ test("real account, profile, project, upload, search, history and deletion at de
     const response = await page.request.post("/api/sessions", { headers: { "X-InterviewPilot": "1", Origin: "http://localhost:3001" }, data: { consent: true, audio_mode: "microphone", title: "History verification", retention: false } });
     expect(response.ok()).toBe(true); const session = await response.json();
     await page.request.post(`/api/sessions/${session.id}/stop`, { headers: { "X-InterviewPilot": "1", Origin: "http://localhost:3001" } });
-    await page.getByRole("button", { name: "Refresh interview" }).click(); await page.getByRole("button", { name: "Open navigation" }).click(); await page.getByRole("button", { name: "Past interviews", exact: true }).click();
+    await page.getByRole("button", { name: "Open navigation" }).click(); await page.getByRole("button", { name: "Refresh interview" }).click(); await page.getByRole("button", { name: "Past interviews", exact: true }).click();
     await page.getByRole("button", { name: "History verification", exact: false }).first().click(); await expect(page.getByText("Transcript retention was disabled")).toBeVisible();
     await page.getByRole("button", { name: "Close dialog" }).click(); await page.getByRole("button", { name: "Delete session History verification" }).click(); await page.getByRole("button", { name: "Delete conversation", exact: true }).click();
     await expect(page.getByRole("button", { name: "History verification", exact: false })).toHaveCount(0);

@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import { allowanceFor, PLAN_LIMITS } from "./supabase-server";
 import type { Evidence, Preferences, Project, Session, Source, Turn, User } from "./types";
 
 export function getServerSupabase(): SupabaseClient | null {
@@ -75,13 +76,8 @@ export async function formatUserResponse(supabase: SupabaseClient, userRow: Supa
   const minutesUsed = Number((secondsUsed / 60).toFixed(1));
   const plan = userRow.plan || "free";
   const creditSeconds = userRow.credit_seconds || 0;
-  const creditMinutes = Math.floor(creditSeconds / 60);
-
-  // Free: 2 mins, Starter: 20 mins, Pro: 45 mins, Value: 120 mins
-  const freeTrialMinutes = 2;
-  const planAllowance = plan === "starter" ? 20 : plan === "pro" ? 45 : plan === "value" ? 120 : 0;
-  const purchasedMinutes = Math.max(creditMinutes, planAllowance);
-  const minuteLimit = freeTrialMinutes + purchasedMinutes;
+  // Single source of truth, shared with app/api/supabase/me: base plus credits.
+  const minuteLimit = Math.round(allowanceFor(plan, creditSeconds) * 100) / 100;
   const creditMinutesRemaining = Math.max(0, Math.round((minuteLimit - minutesUsed) * 10) / 10);
 
   return {
@@ -99,7 +95,7 @@ export async function formatUserResponse(supabase: SupabaseClient, userRow: Supa
     minute_limit: minuteLimit,
     testing_mode: false, // Connected real user in Supabase database
     credit_minutes_remaining: creditMinutesRemaining,
-    monthly_minute_limit: freeTrialMinutes,
+    monthly_minute_limit: PLAN_LIMITS.free + (plan !== "free" && PLAN_LIMITS[plan] ? PLAN_LIMITS[plan] : 0),
     billing_account: true,
   };
 }

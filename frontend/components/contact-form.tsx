@@ -1,12 +1,13 @@
 "use client";
 
+import { PAID_PLANS, type PaidPlanId } from "@/lib/plans";
 import { useState, type FormEvent } from "react";
 import { ArrowUpRight, Mail } from "lucide-react";
 import { supportEmail } from "@/lib/site-content";
 
-export function ContactForm({ selectedPlan }: { selectedPlan?: "starter" | "pro" }) {
+export function ContactForm({ selectedPlan }: { selectedPlan?: PaidPlanId }) {
   const [prepared, setPrepared] = useState(false);
-  const plan = selectedPlan === "starter" ? "Starter" : selectedPlan === "pro" ? "Pro" : null;
+  const plan = selectedPlan ? PAID_PLANS[selectedPlan].name : null;
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);

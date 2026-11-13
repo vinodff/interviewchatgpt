@@ -18,7 +18,7 @@ import type { User } from "./types";
  * error, so the user knows exactly what to set in Vercel.
  */
 
-export const PLAN_LIMITS: Record<string, number> = { free: 2, starter: 20, pro: 45, value: 120 };
+export const PLAN_LIMITS: Record<string, number> = { free: 2, starter: 20, pro: 60, value: 150 };
 
 export function currentMonthKey(): string {
   const now = new Date();
@@ -107,15 +107,25 @@ export async function usedSeconds(db: SupabaseClient, userId: string): Promise<n
   return typeof data?.seconds === "number" ? data.seconds : 0;
 }
 
-/** The exact User shape the frontend expects (see lib/types.ts). */
+/**
+ * The exact User shape the frontend expects (see lib/types.ts).
+ *
+ * A plan and the credits that paid for it describe the same minutes: a Starter
+ * purchase writes plan="starter" alongside credit_seconds=1200. They are lenient
+ * views of one allowance, so take the larger rather than adding them — summing
+ * would charge the same payment twice.
+ */
+export function allowanceFor(plan: string, creditSeconds = 0): number {
+  const planAllowance = plan !== "free" && PLAN_LIMITS[plan] ? PLAN_LIMITS[plan] : 0;
+  const creditMinutes = (creditSeconds || 0) / 60;
+  return PLAN_LIMITS.free + Math.max(planAllowance, creditMinutes);
+}
+
 export async function userShape(db: SupabaseClient, row: UserRow): Promise<User> {
   const seconds = await usedSeconds(db, row.id);
   const plan = PLAN_LIMITS[row.plan] !== undefined ? row.plan : "free";
-  const freeTrialMinutes = PLAN_LIMITS.free || 2;
-  const creditMinutes = Math.floor((row.credit_seconds || 0) / 60);
-  const planAllowance = plan !== "free" && PLAN_LIMITS[plan] ? PLAN_LIMITS[plan] : 0;
-  const purchasedMinutes = Math.max(creditMinutes, planAllowance);
-  const minuteLimit = freeTrialMinutes + purchasedMinutes;
+  const creditSeconds = row.credit_seconds || 0;
+  const minuteLimit = Math.round(allowanceFor(plan, creditSeconds) * 100) / 100;
   const minutesUsed = Math.round((seconds / 60) * 100) / 100;
   const creditMinutesRemaining = Math.max(0, Math.round((minuteLimit - minutesUsed) * 100) / 100);
 
@@ -128,10 +138,10 @@ export async function userShape(db: SupabaseClient, row: UserRow): Promise<User>
     github_verified_username: row.github_verified_username || "",
     minutes_used: minutesUsed,
     minute_limit: minuteLimit,
-    monthly_minute_limit: freeTrialMinutes,
+    monthly_minute_limit: PLAN_LIMITS.free + (plan !== "free" ? PLAN_LIMITS[plan] : 0),
     credit_minutes_remaining: creditMinutesRemaining,
     testing_mode: false,
-    billing_account: Boolean(row.stripe_customer_id || row.cf_customer_id || purchasedMinutes > 0),
+    billing_account: Boolean(row.stripe_customer_id || row.cf_customer_id || creditSeconds > 0),
   };
 }
 

@@ -35,7 +35,7 @@ export function formatAnswer(answer: string): AnswerSegment[] {
   return segments;
 }
 
-/** Fence markers and language labels are excluded from the reading guide. */
+/** Only spoken prose is in the reading guide: fences, labels and code are skipped. */
 export function formattedAnswerWords(answer: string, segments: readonly AnswerSegment[]): AnswerWord[] {
-  return segments.flatMap(segment => segment.kind === "fence" ? [] : tokenizeAnswer(answer.slice(segment.start, segment.end)).map(word => ({ ...word, start: word.start + segment.start, end: word.end + segment.start })));
+  return segments.flatMap(segment => segment.kind !== "text" ? [] : tokenizeAnswer(answer.slice(segment.start, segment.end)).map(word => ({ ...word, start: word.start + segment.start, end: word.end + segment.start })));
 }

@@ -16,14 +16,16 @@ describe("safe fenced answer formatting", () => {
     const answer = "I built a queue.\n\n- Durable retries\n- Clear ownership.";
     expect(preserved(answer).segments).toEqual([{ kind: "text", start: 0, end: answer.length }]);
   });
-  it("preserves Python indentation while excluding fence labels from reading positions", () => {
+  it("preserves Python indentation while excluding fences and code from reading positions", () => {
     const answer = "Here is the code:\n```python\ndef solve(items):\n    for item in items:\n        print(item)\n```\nIt visits each item.";
     const { segments, words } = preserved(answer);
     const code = segments.find(segment => segment.kind === "code")!;
     expect(code.language).toBe("python");
     expect(answer.slice(code.start, code.end)).toContain("\n        print(item)\n");
     expect(words.some(word => word.text === "python")).toBe(false);
-    expect(words.some(word => word.text === "print")).toBe(true);
+    // The reading guide follows spoken prose; it never steps through code tokens.
+    expect(words.some(word => word.text === "print")).toBe(false);
+    expect(words.some(word => word.text === "visits")).toBe(true);
   });
   it("handles incomplete streamed fences, CRLF, tildes, and multiple languages", () => {
     const answer = "~~~js\r\nconst a = 1;\r\n~~~\r\nNext:\n```python\ndef run():\n    return a";
@@ -56,6 +58,15 @@ describe("safe fenced answer formatting", () => {
     const entities: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#x27;": "'" };
     const text = markup.replace(/<[^>]*>/g, "").replace(/&(?:amp|lt|gt|quot|#x27);/g, entity => entities[entity]);
     expect(text).toBe(answer);
+  });
+
+  it("labels code with its language and a copy button without adding words to the answer text", () => {
+    const answer = "```python\ndef add(a, b):\n    return a + b\n```\nIt adds two numbers.";
+    const markup = renderToStaticMarkup(createElement(AnswerReader, { answer, generation: "fixture", active: false, visible: false, completion: null, speech: null, containerRef: { current: null } }));
+    expect(markup).toContain('class="answer-code"');
+    expect(markup).toContain('data-label="Python"');
+    expect(markup).toContain('aria-label="Copy Python code"');
+    expect(markup.indexOf('class="answer-code"')).toBeLessThan(markup.indexOf(">adds<"));
   });
 
   it("ensures synthesizeLocalAnswer produces clean natural answers without robotic section headers or question repeats", async () => {

@@ -19,6 +19,6 @@ export default async function Page({ params, searchParams }: Props) {
   const { slug } = await params;
   if (!isSitePage(slug)) notFound();
   const query = slug === "contact" ? await searchParams : {};
-  const selectedPlan = query.plan === "starter" || query.plan === "pro" ? query.plan : undefined;
+  const selectedPlan = query.plan === "starter" || query.plan === "pro" || query.plan === "value" ? query.plan : undefined;
   return <SitePageContent slug={slug} selectedPlan={selectedPlan} />;
 }

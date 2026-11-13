@@ -313,11 +313,13 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
     if (request.method === "POST") {
       let body: Record<string, unknown> = {};
       try { body = await request.json(); } catch { /* ignore */ }
+      if (!serverSupabase) return json({ detail: "Live sessions are unavailable." }, 503);
       const auth = await getAuthenticatedUser(request);
+      if (!auth) return json({ detail: "Sign in is required." }, 401);
       const sessionId = crypto.randomUUID();
       const sessionData = {
         id: sessionId,
-        user_id: auth?.authId || "guest",
+        user_id: auth.authId,
         title: typeof body?.title === "string" && body.title.trim() ? body.title.trim() : "Live conversation",
         status: "created",
         audio_mode: body?.audio_mode === "tab" ? "tab" : "microphone",
@@ -328,13 +330,9 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
         summary: "",
         metrics: {}
       };
-      if (serverSupabase && auth) {
-        try {
-          const { data, error } = await serverSupabase.from("live_sessions").insert(sessionData).select().single();
-          if (!error && data) return json(data, 201);
-        } catch { /* fallback to returning sessionData */ }
-      }
-      return json(sessionData, 201);
+      const { data, error } = await serverSupabase.from("live_sessions").insert(sessionData).select().single();
+      if (error || !data) return json({ detail: "Could not start a live session." }, 500);
+      return json(data, 201);
     }
   }
 
@@ -380,40 +378,38 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
   }
 
   if (request.method === "POST" && segments[0] === "sessions" && segments[2] === "stop") {
-    if (!serverSupabase) return json({ ok: true });
+    if (!serverSupabase) return json({ detail: "Live sessions are unavailable." }, 503);
     const auth = await getAuthenticatedUser(request);
+    if (!auth) return json({ detail: "Sign in is required." }, 401);
     const sessionId = segments[1];
-    if (auth) {
-      try {
-        const { data } = await serverSupabase.from("live_sessions").update({ status: "ended", ended_at: new Date().toISOString() }).eq("id", sessionId).eq("user_id", auth.authId).select().maybeSingle();
-        if (data) return json(data);
-      } catch { /* ignore */ }
-    }
-    return json({ id: sessionId, status: "ended", ok: true });
+    const { data } = await serverSupabase.from("live_sessions").update({ status: "ended", ended_at: new Date().toISOString() }).eq("id", sessionId).eq("user_id", auth.authId).select().maybeSingle();
+    if (!data) return json({ detail: "Session not found." }, 404);
+    return json(data);
   }
 
   if (request.method === "POST" && segments[0] === "sessions" && segments[2] === "turn") {
-    if (!serverSupabase) return json({ ok: true }, 201);
+    if (!serverSupabase) return json({ detail: "Live sessions are unavailable." }, 503);
     const auth = await getAuthenticatedUser(request);
+    if (!auth) return json({ detail: "Sign in is required." }, 401);
     const sessionId = segments[1];
     let body: Record<string, unknown> = {};
     try { body = await request.json(); } catch { /* ignore */ }
-    if (auth) {
-      const turnRow = {
-        id: typeof body.id === "string" && body.id.length <= 36 ? body.id : crypto.randomUUID(),
-        session_id: sessionId,
-        role: typeof body.role === "string" ? body.role : "unknown",
-        text: typeof body.text === "string" ? body.text : "",
-        question: typeof body.question === "string" ? body.question : "",
-        answer: typeof body.answer === "string" ? body.answer : "",
-        evidence: Array.isArray(body.evidence) ? body.evidence : [],
-        latency_ms: typeof body.latency_ms === "number" ? body.latency_ms : null,
-        created_at: typeof body.created_at === "string" ? body.created_at : new Date().toISOString()
-      };
-      try {
-        await serverSupabase.from("turns").insert(turnRow);
-      } catch { /* ignore */ }
-    }
+    // The session must belong to the caller before a turn may be appended to it.
+    const { data: ownedSession } = await serverSupabase.from("live_sessions").select("id").eq("id", sessionId).eq("user_id", auth.authId).maybeSingle();
+    if (!ownedSession) return json({ detail: "Session not found." }, 404);
+    const turnRow = {
+      id: typeof body.id === "string" && body.id.length <= 36 ? body.id : crypto.randomUUID(),
+      session_id: sessionId,
+      role: typeof body.role === "string" ? body.role : "unknown",
+      text: typeof body.text === "string" ? body.text : "",
+      question: typeof body.question === "string" ? body.question : "",
+      answer: typeof body.answer === "string" ? body.answer : "",
+      evidence: Array.isArray(body.evidence) ? body.evidence : [],
+      latency_ms: typeof body.latency_ms === "number" ? body.latency_ms : null,
+      created_at: typeof body.created_at === "string" ? body.created_at : new Date().toISOString()
+    };
+    const { error } = await serverSupabase.from("turns").insert(turnRow);
+    if (error) return json({ detail: "Could not save this turn." }, 500);
     return json({ ok: true }, 201);
   }
 
@@ -537,6 +533,7 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
   const question = body.question.trim();
   if (body.request_focus !== undefined && (typeof body.request_focus !== "string" || body.request_focus.length > 4000)) return json({ detail: "Request focus must contain at most 4000 characters." }, 400);
   const requestFocus = typeof body.request_focus === "string" ? body.request_focus : undefined;
+  const answerOptions = { alreadyAnswered: Array.isArray(body.already_answered) ? body.already_answered.filter((item): item is string => typeof item === "string").slice(-8).map(item => item.slice(0, 200)) : [] };
   const usedEvidence = (indices: number[]) => preferences.personalization === "technical" ? [] : evidence.slice(0, 3).filter((_, index) => indices.includes(index));
   const interviewContext = body.interview_context === undefined ? null : sanitizeInterviewContext(body.interview_context);
   if (body.interview_context !== undefined && !interviewContext) return json({ detail: "Interview context has an unsupported format." }, 400);
@@ -549,7 +546,7 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
       async start(controller) {
         const send = (event: unknown) => { if (!cancellation.signal.aborted) controller.enqueue(encoder.encode(JSON.stringify(event) + "\n")); };
         try {
-          const reply = await generateAnswerWithGemini(question, preferences, evidence, history, speechHistory, preview => send({ type: "preview", ...preview }), AbortSignal.any([request.signal, cancellation.signal]), interviewContext, undefined, requestFocus);
+          const reply = await generateAnswerWithGemini(question, preferences, evidence, history, speechHistory, preview => send({ type: "preview", ...preview }), AbortSignal.any([request.signal, cancellation.signal]), interviewContext, undefined, requestFocus, answerOptions);
           if (reply) send({ type: "complete", ...reply, evidence: usedEvidence(reply.evidence_indices), latency_ms: Date.now() - started });
           else send({ type: "error", detail: "The AI provider is temporarily unavailable or its quota was reached. Please repeat the question." });
         } catch (error) { send({ type: "error", detail: error instanceof AnswerStoppedError ? error.message : "The answer connection was interrupted. Please repeat the question." }); }
@@ -559,7 +556,7 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
     });
     return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache, no-store, no-transform", "X-Accel-Buffering": "no" } });
   }
-  const reply = await generateAnswerWithGemini(question, preferences, evidence, history, speechHistory, undefined, request.signal, interviewContext, undefined, requestFocus);
+  const reply = await generateAnswerWithGemini(question, preferences, evidence, history, speechHistory, undefined, request.signal, interviewContext, undefined, requestFocus, answerOptions);
   if (!reply) return json({ detail: "The AI provider could not answer. Check model access, quota, and connection, then try again." }, 503);
   return json({ ...reply, evidence: usedEvidence(reply.evidence_indices), keywords: question.split(/\s+/).filter(w => w.length > 2).slice(0, 5), latency_ms: Date.now() - started });
 }

@@ -11,12 +11,21 @@ import { EnhancedRecognition, type MicrophoneLevel } from "./enhanced-recognitio
 import { StreamingRecognition } from "./streaming-recognition";
 import { audioTaskKey, type AudioAnswerContext, type PreparedAudioReply } from "./audio-answer";
 import { questionMentionsTopic } from "./question-options";
+import { AnsweredQuestions, hasExplicitRequest } from "./repeat-gate";
 
 export type LocalEvent = { type: "local"; phase?: "capturing" | "connecting" | "reconnecting" | "ended"; detail?: string; error?: string; dropped?: number; level?: MicrophoneLevel };
 type Question = Extract<LiveMessage, { type: "question" }>;
 type AnswerTerminal = Extract<LiveMessage, { type: "answer_complete" | "answer_cancelled" }>;
 type HeldAnswer = { question: Question; replayQuestion: boolean; delta: string; terminal: AnswerTerminal | null };
 const MAX_RECONNECTS = 8;
+/**
+ * No live-socket backend is deployed: the hosted site, or a local run set to work like it
+ * (NEXT_PUBLIC_LIVE_TRANSPORT=browser). Live sessions then always run browser-side.
+ */
+function hostedWithoutLiveBackend(): boolean {
+  if (process.env.NEXT_PUBLIC_LIVE_TRANSPORT === "browser") return true;
+  return typeof window !== "undefined" && (window.location.hostname.includes("vercel.app") || window.location.hostname.includes("interviewwin.live"));
+}
 const MAX_OUTPUT_BYTES = 64000;
 const MAX_HELD_CHARACTERS = 128000;
 
@@ -49,10 +58,14 @@ export class LiveController {
   private answerRequests = new Map<number, AbortController>();
   private latestAnsweredSequence = 0;
   private queuedSpeech: Array<{ text: string; transcriptId?: string; transcriptFinal: boolean }> = [];
+  // Set once the server reports it has no knowledge search, so later questions skip the wait.
+  private remoteSearchUnavailable = false;
   private generationSequence = 0;
   private recognitionRestart: ReturnType<typeof setTimeout> | null = null;
   private browserMode = false;
   private interviewMemory = new InterviewMemory();
+  // Questions already answered this interview: repeats and echoes keep the current answer.
+  private answeredQuestions = new AnsweredQuestions();
   private enhancedMicrophone = false;
   private streamingMicrophone = false;
   private keepAliveStream: MediaStream | null = null;
@@ -94,7 +107,16 @@ export class LiveController {
     for (const request of this.answerRequests.values()) request.abort();
     this.answerRequests.clear(); this.queuedSpeech = [];
     this.notify({ type: "transcript", id: `tr_manual_${Date.now()}`, role: "interviewer", text: trimmed, final: true });
-    void this.handleBrowserQuestion(trimmed);
+    const cached = this.answeredQuestions.cached(trimmed);
+    if (cached) {
+      const genId = `gen_${++this.generationSequence}`;
+      this.latestAnsweredSequence = this.generationSequence;
+      this.currentAnswerText = cached.answer;
+      this.deliver({ type: "question", generation_id: genId, question: cached.question, keywords: [] });
+      this.deliver({ type: "answer_complete", generation_id: genId, answer: cached.answer, evidence: [], keywords: [], latency_ms: 0 });
+      return;
+    }
+    void this.handleBrowserQuestion(trimmed, undefined, true, true);
   }
 
   /**
@@ -193,6 +215,16 @@ export class LiveController {
         this.startBrowserLiveMode();
         return;
       }
+      if (mode === "microphone" && hostedWithoutLiveBackend()) {
+        // Start listening at once, still inside the tap: one microphone, no session or ticket round trips
+        // first. The server record (minutes, history) is created alongside and swapped in when ready.
+        this.browserMode = true;
+        this.session = createStoredSession({ title, audio_mode: mode, retention });
+        this.onSession(this.session);
+        this.startBrowserLiveMode();
+        void this.createServerSession(mode, title, retention);
+        return;
+      }
       // Browser permission requests run in Start's gesture, before the first await or HTTP call.
       this.capture = new AudioCapture(mode, packet => this.sendAudio(packet), message => { void this.fail(message); });
       this.notify({ type: "local", phase: "capturing", detail: "Waiting for your browser’s audio permission…" });
@@ -219,6 +251,20 @@ export class LiveController {
     } catch (error) { if (!this.stopped) await this.fail(messageOf(error)); }
   }
 
+  private async createServerSession(mode: AudioMode, title: string, retention: boolean): Promise<void> {
+    let remote: Session;
+    try {
+      remote = await api<Session>("/sessions", post({ consent: true, audio_mode: mode, title: title.trim() || "Live conversation", retention }));
+    } catch { return; /* Same as before: the session continues on the local record. */ }
+    if (this.stopped) {
+      // Stopped before the record existed: close it so it is not left open.
+      if (this.stopRemote) await api(`/sessions/${encodeURIComponent(remote.id)}/stop`, post()).catch(() => undefined);
+      return;
+    }
+    this.session = remote;
+    this.onSession(remote);
+  }
+
   private async connect(): Promise<void> {
     if (this.stopped || !this.session) return;
     const request = new AbortController();
@@ -230,7 +276,7 @@ export class LiveController {
       ticket = result.ticket;
     } catch (error) {
       if (this.stopped || request.signal.aborted) return;
-      if (error instanceof ApiError && error.status === 404 && typeof window !== "undefined" && (window.location.hostname.includes("vercel.app") || window.location.hostname.includes("interviewwin.live"))) {
+      if (error instanceof ApiError && error.status === 404 && hostedWithoutLiveBackend()) {
         this.browserMode = true;
         this.startBrowserLiveMode();
         return;
@@ -336,7 +382,7 @@ export class LiveController {
   private scheduleReconnect(): void {
     if (this.stopped || this.reconnectTimer) return;
     this.latestQuestion = null; this.heldAnswer = null;
-    if (this.reconnects >= 1 && typeof window !== "undefined" && (window.location.hostname.includes("vercel.app") || window.location.hostname.includes("interviewwin.live"))) {
+    if (this.reconnects >= 1 && hostedWithoutLiveBackend()) {
       this.releaseSocket();
       this.browserMode = true;
       this.startBrowserLiveMode();
@@ -427,7 +473,7 @@ export class LiveController {
     this.ticketRequest?.abort(); this.ticketRequest = null;
     this.latestQuestion = null; this.heldAnswer = null;
     for (const request of this.answerRequests.values()) request.abort();
-    this.answerRequests.clear(); this.queuedSpeech = []; this.interviewMemory.reset();
+    this.answerRequests.clear(); this.queuedSpeech = []; this.interviewMemory.reset(); this.answeredQuestions.reset();
     this.audioReplies.clear(); this.pendingAudioSpeech = "";
     if (this.recognitionRestart) clearTimeout(this.recognitionRestart);
     this.recognitionRestart = null;
@@ -470,10 +516,17 @@ export class LiveController {
   private startBrowserLiveMode(): void {
     if (this.stopped) return;
 
-    // Acquire Screen Wake Lock on mobile devices so screen and audio don't sleep
+    // Acquire Screen Wake Lock on mobile devices so screen and audio don't sleep.
+    // The request resolves asynchronously, so stop() can run first: release the lock
+    // immediately in that case instead of storing it where cleanup has already passed.
     if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
       try {
         (navigator as unknown as { wakeLock: { request: (type: string) => Promise<unknown> } }).wakeLock.request("screen").then((lock: unknown) => {
+          const release = (lock as { release?: () => Promise<void> } | null)?.release;
+          if (this.stopped || this.wakeLock) {
+            void release?.call(lock)?.catch?.(() => undefined);
+            return;
+          }
           this.wakeLock = lock;
         }).catch(() => undefined);
       } catch {
@@ -497,7 +550,6 @@ export class LiveController {
           stream.getTracks().forEach(t => t.stop());
           return;
         }
-        this.keepAliveStream = stream;
         try {
           const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
           if (AudioContextClass) {
@@ -507,12 +559,24 @@ export class LiveController {
             silent.gain.value = 0; // completely silent
             source.connect(silent);
             silent.connect(ctx.destination);
+            // Cleanup may have already run while getUserMedia was pending.
+            if (this.stopped) {
+              void ctx.close().catch(() => undefined);
+              stream.getTracks().forEach(t => t.stop());
+              return;
+            }
+            this.keepAliveStream = stream;
             this.keepAliveContext = ctx;
             if (ctx.state === "suspended") {
               void ctx.resume().catch(() => undefined);
             }
+          } else {
+            this.keepAliveStream = stream;
           }
-        } catch { /* AudioContext fallback */ }
+        } catch {
+          // AudioContext fallback: keep the stream, which is the part that holds the mic.
+          this.keepAliveStream = stream;
+        }
       }).catch(() => undefined);
     }
 
@@ -610,6 +674,12 @@ export class LiveController {
 
           const classification = this.classifySpeech(cleaned);
           if (classification === "filler" && !trailingTopicRequest(cleaned) && !(this.interviewMemory.hasContext && isContextFollowUp(cleaned))) {
+            this.notify({ type: "transcript", id: utteranceId, role: "unknown", text: cleaned, final: true });
+            return;
+          }
+
+          if (classification === "candidate" && !hasExplicitRequest(cleaned) && !(this.interviewMemory.hasContext && isContextFollowUp(cleaned))) {
+            // The candidate narrating or reading the answer aloud: show it, but do not pay for an answer call.
             this.notify({ type: "transcript", id: utteranceId, role: "unknown", text: cleaned, final: true });
             return;
           }
@@ -851,19 +921,21 @@ export class LiveController {
     }
   }
 
-  private async handleBrowserQuestion(questionText: string, transcriptId?: string, transcriptFinal = true): Promise<void> {
+  private async handleBrowserQuestion(questionText: string, transcriptId?: string, transcriptFinal = true, manual = false): Promise<void> {
     if (this.stopped || !this.session) return;
-    if (this.answerRequests.size >= 3) {
-      if (this.queuedSpeech.length >= 8) {
-        this.notify({ type: "local", error: "Speech is arriving faster than the AI service can process it. Pause briefly, then repeat the latest question." });
-        return;
-      }
-      this.queuedSpeech.push({ text: questionText, transcriptId, transcriptFinal });
+    if (!manual && this.answeredQuestions.isRepeat(questionText)) {
+      this.notify({ type: "local", detail: "Same question as before, so the current answer stays on screen.", error: "" });
+      return;
+    }
+    if (this.answerRequests.size >= 2) {
+      // Latest speech wins: older waiting speech would only produce answers that get replaced.
+      this.queuedSpeech = [{ text: questionText, transcriptId, transcriptFinal }];
       return;
     }
     const request = new AbortController();
     const requestSequence = ++this.generationSequence;
     this.answerRequests.set(requestSequence, request);
+    this.answeredQuestions.start(requestSequence, questionText);
     const genId = `gen_${requestSequence}`;
     const cachedAudio = transcriptId ? this.audioReplies.get(transcriptId) : undefined;
     if (transcriptId) this.audioReplies.delete(transcriptId);
@@ -886,9 +958,12 @@ export class LiveController {
     try {
       evidence = searchStoredEvidence(focusText);
       user = getStoredUser();
-      if (!evidence.length) {
+      if (!evidence.length && !this.remoteSearchUnavailable) {
         const remote = await Promise.race([
-          api<Evidence[]>(`/knowledge/search?q=${encodeURIComponent(focusText)}`).catch(() => []),
+          api<Evidence[]>(`/knowledge/search?q=${encodeURIComponent(focusText)}`).catch(error => {
+            if (error instanceof ApiError && [404, 405, 501].includes(error.status)) this.remoteSearchUnavailable = true;
+            return [];
+          }),
           new Promise<Evidence[]>(r => setTimeout(() => r([]), 350))
         ]);
         if (remote && remote.length) evidence = remote;
@@ -942,7 +1017,7 @@ export class LiveController {
         } else if (reply.requests_answer) acceptEvent({ type: "preview", ...reply });
         acceptEvent({ type: "complete", ...reply, evidence: [], keywords: [] });
       } else await streamApi("/live/answer", {
-        ...post({ question: questionText.length <= 4000 ? questionText : `${questionText.slice(0, 900)} … ${questionText.slice(-3000)}`, request_focus: focusText, preferences, evidence, interview_context: this.interviewMemory.context(), stream: true }), signal: request.signal,
+        ...post({ question: questionText.length <= 4000 ? questionText : `${questionText.slice(0, 900)} … ${questionText.slice(-3000)}`, request_focus: focusText, preferences, evidence, interview_context: this.interviewMemory.context(), already_answered: this.answeredQuestions.recent(), stream: true }), signal: request.signal,
       }, acceptEvent);
       const result = completed as Reply | null;
       if (!result) throw new Error("The answer stream ended before it completed. Please repeat the question.");
@@ -965,6 +1040,7 @@ export class LiveController {
         evidence: usedEvidence,
         keywords: Array.isArray(result.keywords) ? result.keywords : words.slice(0, 5), latency_ms: Date.now() - startedAt });
       this.interviewMemory.recordAnswer(genId, resolvedQuestion, answer, questionText);
+      this.answeredQuestions.finish(requestSequence, resolvedQuestion, answer);
       this.notify({ type: "metrics", questions: this.interviewMemory.context().answered_count, reconnects: 0, audio_dropped: 0, first_token_ms: firstTokenMs ?? Date.now() - startedAt, total_ms: Date.now() - startedAt });
       addTurnToStoredSession(this.session.id, { id: genId, role: "interviewer", text: questionText, question: resolvedQuestion,
         answer, evidence: usedEvidence, created_at: new Date().toISOString() });
@@ -981,6 +1057,7 @@ export class LiveController {
     } finally {
       clearTimeout(timeout);
       this.answerRequests.delete(requestSequence);
+      this.answeredQuestions.drop(requestSequence);
       this.answeringQuestion = this.answerRequests.size > 0;
       const next = this.queuedSpeech.shift();
       if (next && !this.stopped) void this.handleBrowserQuestion(next.text, next.transcriptId, next.transcriptFinal);

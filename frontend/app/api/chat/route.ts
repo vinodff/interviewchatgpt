@@ -26,8 +26,8 @@ InterviewWin Live is a real-time AI interview assistant that listens during live
 ## Pricing & Plans (INR, one-time packs, no subscription)
 - **Free**: 2 minutes — ₹0, completely free, no card needed
 - **Starter**: 20 minutes — ₹199 one-time (₹9.95/min)
-- **Popular (Most popular)**: 45 minutes — ₹399 one-time (₹8.87/min, ~11% cheaper per min vs Starter)
-- **Value**: 120 minutes — ₹999 one-time (₹8.33/min, ~16% cheaper per min vs Starter)
+- **Popular (Most popular)**: 60 minutes — ₹499 one-time (₹8.32/min, ~16% cheaper per min vs Starter)
+- **Value (Best value)**: 150 minutes — ₹999 one-time (₹6.66/min, ~33% cheaper per min vs Starter)
 All paid plans include every feature. Minutes never expire. No monthly fees.
 
 ## Payment Gateway
@@ -134,7 +134,8 @@ export async function POST(request: NextRequest) {
       generationConfig: { maxOutputTokens: 512, temperature: 0.4, topP: 0.9 },
     };
 
-    const model = "gemini-2.0-flash-lite";
+    // gemini-2.0-flash-lite was retired (Google returns 404), which broke the site chat with a 502.
+    const model = process.env.GEMINI_CHAT_MODEL || process.env.GEMINI_FAST_MODEL || "gemini-3.5-flash-lite";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${apiKey}&alt=sse`;
 
     const upstream = await fetch(url, {
@@ -193,3 +194,4 @@ export async function POST(request: NextRequest) {
     return new Response(JSON.stringify({ error: "Something went wrong. Please try again." }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 }
+

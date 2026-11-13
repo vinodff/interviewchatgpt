@@ -381,7 +381,8 @@ export function synthesizeLocalAnswer(
         ? "Honestly, the cleanest way to write this is pretty straightforward in Python:"
         : "Here is the optimal implementation using a clean, straightforward approach in Python:";
     const complexity = "This implementation runs with optimal time complexity and minimal auxiliary space.";
-    const answerText = `${intro}\n\n${snippet}\n\n${complexity}`;
+    // Code first, so it is on screen immediately; the short note follows.
+    const answerText = `${snippet}\n\n${intro.replace(/:$/, ".")} ${complexity}`;
     return {
       question: cleaned,
       answer: answerText,

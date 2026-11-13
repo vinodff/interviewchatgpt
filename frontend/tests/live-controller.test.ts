@@ -484,7 +484,17 @@ describe("mobile voice buffering (predictable full-phrase capture)", () => {
     const { live } = await startBrowserMode(vi.fn(), true); let segments = 0;
     doubles.api.mockImplementation(async (path: string) => path === "/live/transcribe" ? { text: ++segments === 1 ? "I built the" : "What is a Python dictionary?" } : { requests_answer: false, speaker_role: "user", question: "", answer: "" });
     quietSpeechPackets(); await vi.advanceTimersByTimeAsync(1000); quietSpeechPackets(); await vi.advanceTimersByTimeAsync(1000);
-    expect(doubles.stream.mock.calls.map(([, options]) => JSON.parse(String(options.body)).question)).toEqual(["I built the", "What is a Python dictionary?"]);
+    // Candidate narration with no request is never sent to the model, and never leaks into the next question.
+    expect(doubles.stream.mock.calls.map(([, options]) => JSON.parse(String(options.body)).question)).toEqual(["What is a Python dictionary?"]);
+    await live.stop();
+  });
+  it("answers a question once even when it is repeated or echoed as a bare topic", async () => {
+    const { live } = await startBrowserMode(vi.fn(), true); let segments = 0;
+    doubles.api.mockImplementation(async (path: string) => path === "/live/transcribe"
+      ? { text: ["What is Python?", "Python", "What is Python?", "What is Java?"][segments++] }
+      : { requests_answer: true, speaker_role: "interviewer", question: segments >= 4 ? "What is Java?" : "What is Python?", answer: "A high-level language.", evidence: [], keywords: [] });
+    for (let i = 0; i < 4; i++) { quietSpeechPackets(); await vi.advanceTimersByTimeAsync(1000); }
+    expect(doubles.stream.mock.calls.map(([, options]) => JSON.parse(String(options.body)).question)).toEqual(["What is Python?", "What is Java?"]);
     await live.stop();
   });
   it("retains a slow contextual language prefix across final recognition boundaries", async () => {
@@ -698,5 +708,52 @@ describe("mobile voice buffering (predictable full-phrase capture)", () => {
     const followup = final.find(event => event.text === "How does it work?");
     expect(corrected).toBeDefined(); expect(followup).toBeDefined(); expect(corrected?.id).not.toBe(followup?.id);
     await live.stop();
+  });
+});
+
+describe("fast start on the hosted site", () => {
+  const storage = () => { const store = new Map<string, string>(); return { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, String(v)); }, removeItem: (k: string) => { store.delete(k); }, clear: () => store.clear() }; };
+  const hosted = () => vi.stubGlobal("window", { location: { protocol: "https:", host: "www.interviewwin.live", hostname: "www.interviewwin.live" }, localStorage: storage() });
+  const pendingSession = () => {
+    let finish!: (value: unknown) => void;
+    doubles.api.mockImplementation((path: string) => path === "/sessions" ? new Promise(resolve => { finish = resolve; })
+      : path === "/live/speech-ticket" ? Promise.resolve({ token: "auth_tokens/unit-test", expires_at: Date.now() + 60000 })
+      : Promise.resolve({ id: "remote", status: "ended" }));
+    return (value: unknown) => finish(value);
+  };
+
+  it("starts recognition with one microphone without waiting for the server session or a live ticket", async () => {
+    hosted(); const finishSession = pendingSession(); const onSession = vi.fn();
+    const live = new LiveController(vi.fn(), onSession);
+    await live.start("microphone", "", false, { streamingMicrophone: true });
+    await vi.advanceTimersByTimeAsync(0);
+    const paths = doubles.api.mock.calls.map(([path]) => String(path));
+    expect(paths).toContain("/live/speech-ticket");
+    expect(paths.filter(path => /^\/sessions\/.+\/ticket$/.test(path))).toEqual([]);
+    expect(doubles.captureStart).toHaveBeenCalledTimes(1);
+    finishSession({ id: "remote", status: "created" }); await vi.advanceTimersByTimeAsync(0);
+    expect(onSession).toHaveBeenLastCalledWith(expect.objectContaining({ id: "remote" }));
+    await live.stop();
+  });
+
+  it("runs browser-side locally when configured like the hosted site, for any microphone engine", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LIVE_TRANSPORT", "browser");
+    vi.stubGlobal("window", { location: { protocol: "http:", host: "localhost:3001", hostname: "localhost" }, localStorage: storage() });
+    pendingSession();
+    const live = new LiveController(vi.fn(), vi.fn());
+    await live.start("microphone", "", false, { enhancedMicrophone: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(doubles.api.mock.calls.map(([path]) => String(path)).filter(path => /^\/sessions\/.+\/ticket$/.test(path))).toEqual([]);
+    expect(Socket.instances).toHaveLength(0);
+    await live.stop();
+  });
+
+  it("closes a server session that arrives after Stop", async () => {
+    hosted(); const finishSession = pendingSession();
+    const live = new LiveController(vi.fn(), vi.fn());
+    await live.start("microphone", "", false, { streamingMicrophone: true });
+    await live.stop();
+    finishSession({ id: "remote", status: "created" }); await vi.advanceTimersByTimeAsync(0);
+    expect(doubles.api.mock.calls.map(([path]) => String(path))).toContain("/sessions/remote/stop");
   });
 });

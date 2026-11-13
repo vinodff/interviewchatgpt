@@ -60,12 +60,16 @@ test("browser microphone capture automatically produces a grounded Gemini answer
     await expect(page.locator(".workspace.mobile-live")).toBeVisible();
     const answerPane = page.locator("#live-answer-pane");
     const controlsPane = page.locator("#live-controls-pane");
+    // Answer first; the control dock (home link, status, End, menu) sits under the resize handle.
+    const header = page.locator(".mobile-live-dock");
     await expect.poll(async () => Math.round((await answerPane.boundingBox())!.height)).toBe(244);
     expect((await answerPane.boundingBox())!.y).toBe(0);
     expect((await controlsPane.boundingBox())!.y).toBeCloseTo(243.6, 0);
+    await expect(header).toBeInViewport();
     await expect(answerPane.locator(".answer-text")).toContainText(/Redis/i);
     await expect(answerPane.locator("button,h1,.live-clock,.question-block")).toHaveCount(0);
-    await expect(page.locator(".mobile-live-toolbar")).toContainText("InterviewWin Live");
+    await expect(header.getByRole("heading", { name: "Live interview", exact: true })).toBeVisible();
+    await expect(header.getByRole("link", { name: "InterviewWin home page" })).toBeVisible();
     const divider = page.getByRole("separator", { name: "Resize answer area" });
     await expect(divider).toHaveAttribute("aria-valuenow", "30");
     await divider.click();
@@ -82,9 +86,9 @@ test("browser microphone capture automatically produces a grounded Gemini answer
     await expect(divider).toHaveAttribute("aria-valuenow", "40");
     await divider.press("End");
     await expect(divider).toHaveAttribute("aria-valuenow", "70");
-    await expect(page.locator(".mobile-capture-bar").getByRole("button", { name: "End interview", exact: true })).toBeInViewport();
+    await expect(header.getByRole("button", { name: "End interview", exact: true })).toBeInViewport();
     await page.setViewportSize({ width: 375, height: 400 });
-    await expect(page.locator(".mobile-capture-bar").getByRole("button", { name: "End interview", exact: true })).toBeInViewport();
+    await expect(header.getByRole("button", { name: "End interview", exact: true })).toBeInViewport();
     expect(Number(await divider.getAttribute("aria-valuenow"))).toBeLessThan(70);
     await page.setViewportSize({ width: 375, height: 812 });
     await expect(divider).toHaveAttribute("aria-valuenow", "70");
@@ -116,7 +120,8 @@ test("browser microphone capture automatically produces a grounded Gemini answer
     await page.locator(".live-lower-scroll").evaluate(element => { element.scrollTop = 0; });
     await page.screenshot({ path: "test-results/live-mobile.png", fullPage: true });
     await page.getByRole("button", { name: "End interview", exact: true }).click();
-    await expect(page.locator(".mobile-capture-bar")).toContainText("Session stopped");
+    await expect(page.locator(".mobile-live-dock")).toContainText("Session stopped");
+    await expect(page.getByRole("button", { name: "Start interview", exact: true })).toBeVisible();
     await expect(answerText.locator('[data-reader-current="true"]')).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally {

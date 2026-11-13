@@ -6,7 +6,7 @@ test('landing adapts to screen sizes and opens the workspace', async ({ page }) 
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('You know your story.');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Crack every interview.');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.getByText('Can I use it on my phone?', { exact: true }).click();
     await expect(page.getByText('Yes. The interview screen adapts', { exact: false })).toBeVisible();

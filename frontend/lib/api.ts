@@ -49,7 +49,7 @@ export function getApiAuthToken(): string | null {
   return memoryToken;
 }
 
-async function resolveAuthToken(): Promise<string | null> {
+export async function resolveAuthToken(): Promise<string | null> {
   if (memoryToken) return memoryToken;
   if (typeof window === "undefined") return null;
   try {
