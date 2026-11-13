@@ -4,6 +4,7 @@ import { ArrowRight, AudioLines } from "lucide-react";
 import { Brand } from "./brand";
 import { SiteHeader } from "./site-header";
 import { SiteMotion } from "./site-motion";
+import { SiteChatbot } from "./site-chatbot";
 import { businessAddress, supportEmail, supportPhone } from "@/lib/site-content";
 
 const footerGroups = [
@@ -13,7 +14,7 @@ const footerGroups = [
 ];
 
 export function SiteShell({ children }: { children: ReactNode }) {
-  return <div className="landing site-shell"><a className="skip-link" href="#landing-main">Skip to content</a><SiteMotion /><SiteHeader /><main id="landing-main" tabIndex={-1}>{children}</main>
+  return <div className="landing site-shell"><a className="skip-link" href="#landing-main">Skip to content</a><SiteMotion /><SiteHeader /><main id="landing-main" tabIndex={-1}>{children}</main><SiteChatbot />
     <footer className="site-footer"><div className="landing-container"><div className="site-footer-grid"><div className="site-footer-brand"><Link href="/" className="landing-brand" aria-label="InterviewWin home"><Brand /></Link><p>Your experience is the source.<br />Your voice makes the difference.</p><div className="site-footer-contact"><a href={`mailto:${supportEmail}`}>{supportEmail}</a><a href={`tel:${supportPhone.replace(/\s+/g, "")}`}>{supportPhone}</a><span className="site-footer-address">{businessAddress}</span></div></div>{footerGroups.map(group => <nav aria-label={group.title} key={group.title}><h2>{group.title}</h2>{group.links.map(([label, href]) => <Link href={href} key={href}>{label}</Link>)}</nav>)}</div><div className="site-footer-bottom"><span>© {new Date().getFullYear()} InterviewWin Live</span><span><AudioLines size={14} aria-hidden="true" /> Assistance with permission. Always.</span></div></div></footer>
   </div>;
 }
