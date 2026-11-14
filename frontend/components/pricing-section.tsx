@@ -4,6 +4,7 @@ import { loadPlans } from "@/lib/server-plans";
 import { PLAN_DETAILS } from "@/lib/plan-details";
 import type { PaidPlanId, Plan } from "@/lib/plans";
 import { PlanCard } from "./pricing/plan-card";
+import { PrizeOfferCard } from "./referral/prize-offer";
 
 function isPaid(plan: Plan): plan is Plan & { id: PaidPlanId } {
   return plan.id !== "free";
@@ -44,6 +45,8 @@ export async function PricingSection({ full = false }: { full?: boolean }) {
           <Link href="/interview?view=live&signup=1" className="pc-free-link">Start free <ArrowRight size={15} aria-hidden="true" /></Link>
         </div>
       )}
+
+      <PrizeOfferCard />
 
       <p className="pricing-note">
         <ShieldCheck size={16} aria-hidden="true" />

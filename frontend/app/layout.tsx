@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { ReferralCapture } from "@/components/referral/referral-capture";
 
 export const metadata: Metadata = {
   title: "InterviewWin Live · Your work, in your words",
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         />
       </head>
       <body>
+        <ReferralCapture />
         {children}
       </body>
     </html>

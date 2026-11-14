@@ -18,6 +18,7 @@ import { useOwnedApi } from "@/lib/use-owned-api";
 import { CashfreeService } from "@/lib/cashfree-service";
 import type { Health, User } from "@/lib/types";
 import { Alert, Button, SectionHeader } from "./ui";
+import { ReferralCard } from "./referral/referral-card";
 import { PlanCard } from "./pricing/plan-card";
 
 function isPaidPlan(plan: Plan): plan is Plan & { id: PaidPlanId } {
@@ -237,6 +238,7 @@ export function Billing({
         title="Plans & Live Minutes"
         description="Choose the plan that fits your interview loop. Get instant access to resume uploads, knowledge base context, and real-time AI reasoning."
       />
+      {!user.testing_mode && <><ReferralCard /></>}
 
       <Alert tone="info">
         <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
