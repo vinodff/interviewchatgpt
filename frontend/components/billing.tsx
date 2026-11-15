@@ -16,6 +16,7 @@ import { PAID_PLANS, parsePlans, type PaidPlanId, type Plan, type PlanCatalog, t
 import { PLAN_DETAILS } from "@/lib/plan-details";
 import { useOwnedApi } from "@/lib/use-owned-api";
 import { CashfreeService } from "@/lib/cashfree-service";
+import { trackInitiateCheckout, trackPurchase } from "@/lib/meta-pixel";
 import type { Health, User } from "@/lib/types";
 import { Alert, Button, SectionHeader } from "./ui";
 import { ReferralCard } from "./referral/referral-card";
@@ -102,6 +103,7 @@ export function Billing({
               ? "pro"
               : "starter");
           const minutesGranted = PAID_PLANS[(planToUse in PAID_PLANS ? planToUse : "starter") as PaidPlanId].minutes;
+          trackPurchase(orderId, Number(res.order_amount) || PAID_PLANS[(planToUse in PAID_PLANS ? planToUse : "starter") as PaidPlanId].amountInr, planToUse);
 
           setSuccess(
             `Payment confirmed! Your ${planToUse.toUpperCase()} plan is now active with ${minutesGranted} minutes.`
@@ -162,6 +164,7 @@ export function Billing({
       try {
         const phoneToUse = customerPhone || phone.trim() || "9876543210";
         const amount = PAID_PLANS[(plan in PAID_PLANS ? plan : "starter") as PaidPlanId].amountInr;
+        trackInitiateCheckout(plan, amount);
 
         const order = await CashfreeService.createOrder({
           amount,

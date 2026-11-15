@@ -5,6 +5,7 @@ import { ArrowRight, Check, FileText, LockKeyhole, Radio, Sparkles } from "lucid
 import { api, messageOf, post, setApiAuthToken } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { fetchSupabaseMe } from "@/lib/supabase-identity";
+import { trackSignup } from "@/lib/meta-pixel";
 import type { User } from "@/lib/types";
 import { Alert, Button } from "./ui";
 import { Brand } from "./brand";
@@ -33,6 +34,23 @@ function GoogleIcon() {
   );
 }
 
+// Instagram / Facebook / WhatsApp etc. open links in an in-app browser where Google blocks OAuth
+// ("Error 403: disallowed_useragent"). Detect it so we can send people to a real browser.
+function inAppBrowser(): "android" | "ios" | null {
+  if (typeof navigator === "undefined") return null;
+  const ua = navigator.userAgent || "";
+  if (!/Instagram|FBAN|FBAV|FB_IAB|FBIOS|FB4A|Messenger|WhatsApp|Snapchat|LinkedInApp|Line\//i.test(ua)) return null;
+  return /Android/i.test(ua) ? "android" : "ios";
+}
+
+function openInExternalBrowser() {
+  const url = window.location.href;
+  if (/Android/i.test(navigator.userAgent)) {
+    const noScheme = url.replace(/^https?:\/\//, "");
+    window.location.href = `intent://${noScheme}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(url)};end`;
+  }
+}
+
 export function Auth({
   onAuthenticated,
   serviceError,
@@ -47,6 +65,8 @@ export function Auth({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showEmailFallback, setShowEmailFallback] = useState(false);
+  const [inApp, setInApp] = useState<"android" | "ios" | null>(null);
+  useEffect(() => { setInApp(inAppBrowser()); }, []);
 
   // Check and sync Supabase session on mount or return from OAuth redirect
   useEffect(() => {
@@ -95,6 +115,7 @@ export function Auth({
               }).catch(() => {});
             }
             const user = await fetchSupabaseMe();
+            if (event === "SIGNED_IN") trackSignup(session.user.id, session.user.created_at);
             if (!cancelled) onAuthenticated(user);
           } catch (err) {
             if (!cancelled) setError(messageOf(err));
@@ -117,6 +138,12 @@ export function Auth({
 
   async function handleGoogleSignIn() {
     setError("");
+    const app = inAppBrowser();
+    if (app === "android") { openInExternalBrowser(); return; }
+    if (app === "ios") {
+      setError("Google sign-in doesn't work inside the Instagram/Facebook browser. Tap ••• (top right) → \"Open in external browser\", then continue with Google.");
+      return;
+    }
     setBusy(true);
     if (!supabase) {
       setError("Google Sign-In is not configured. Please use email and password.");
@@ -230,6 +257,15 @@ export function Auth({
           <p className="muted">
             Access your interview workspace, knowledge sources, and live assistance in seconds.
           </p>
+
+          {inApp && (
+            <div style={{ marginTop: "16px", padding: "14px 16px", borderRadius: "10px", background: "#FEF3C7", border: "1px solid #F59E0B", color: "#78350F", fontSize: "14px", lineHeight: 1.5 }}>
+              <strong>Open in your browser to sign up.</strong>{" "}
+              {inApp === "android"
+                ? <>Google sign-in is blocked inside this app. <button type="button" onClick={openInExternalBrowser} style={{ background: "none", border: "none", padding: 0, color: "#92400E", fontWeight: 700, textDecoration: "underline", cursor: "pointer" }}>Open in Chrome →</button></>
+                : <>Google sign-in is blocked inside this app. Tap <strong>•••</strong> (top right) → <strong>Open in external browser</strong>, then continue with Google.</>}
+            </div>
+          )}
 
           {(serviceError || error) && <Alert>{error || serviceError}</Alert>}
 
