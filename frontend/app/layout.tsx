@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { ReferralCapture } from "@/components/referral/referral-capture";
 import { MetaPixel } from "@/components/meta-pixel";
+import { Analytics } from '@vercel/analytics/next';
 
 export const metadata: Metadata = {
   title: "InterviewWin Live · Your work, in your words",
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <ReferralCapture />
         <MetaPixel />
         {children}
+        <Analytics />
       </body>
     </html>
   );
