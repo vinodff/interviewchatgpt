@@ -16,14 +16,35 @@ const REDUCED_MOTION_PROGRESS = 0.74;
 const SETTLE_EPSILON = 0.0004;
 const PHASE_NAMES = Object.keys(PHASE_WINDOWS) as PhaseName[];
 const SCREEN_IMAGES = ["/scene/interviewer.webp", "/scene/candidate.webp"];
+/** Frames are rendered only while this share of the pinned stage is on screen; a sliver at the fold keeps its last frame. */
+const VISIBLE_SHARE = 0.1;
+/** The visitor counts as reading, not scrolling, after this long without a scroll event. */
+const QUIET_MS = 400;
+/** WebGL drops to one frame per progress tick while scrolling; after this pause it runs freely again. */
+const SCROLLING_MS = 140;
+
+type Stage = "waiting" | "webgl" | "fallback";
 
 function supportsWebGL(): boolean {
   try {
     const canvas = document.createElement("canvas");
-    return Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl"));
+    const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+    return Boolean(gl);
   } catch {
     return false;
   }
+}
+
+function requestIdle(callback: () => void): number {
+  const ric = window.requestIdleCallback?.bind(window);
+  if (ric) return ric(callback, { timeout: 4000 });
+  return window.setTimeout(callback, 250);
+}
+
+function cancelIdle(handle: number) {
+  if (window.cancelIdleCallback) window.cancelIdleCallback(handle);
+  else window.clearTimeout(handle);
 }
 
 /** Writes the timeline into CSS variables (for the HTML layers) and a ref (for the 3D scene). */
@@ -35,23 +56,27 @@ function applyProgress(section: HTMLElement, state: SceneState, progress: number
   section.style.setProperty("--progress", progress.toFixed(4));
   const step = String(stepAt(progress));
   if (section.dataset.step !== step) section.dataset.step = step;
+  state.requestFrame?.();
 }
 
 export function InterviewScene() {
   const root = useRef<HTMLElement>(null);
+  const sticky = useRef<HTMLDivElement>(null);
   const state = useRef<SceneState>({ progress: 0, phases: phasesAt(0) });
   const htmlLayer = useRef<HTMLDivElement>(null);
-  const [canRender3D, setCanRender3D] = useState(false);
+  const [stage, setStage] = useState<Stage>("waiting");
   const [active, setActive] = useState(false);
+  const [scrolling, setScrolling] = useState(false);
 
   useEffect(() => {
     const section = root.current;
-    if (!section) return;
-    setCanRender3D(supportsWebGL());
+    const stageElement = sticky.current;
+    if (!section || !stageElement) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     let current = 0;
     let frame = 0;
     let last = 0;
+    let scrollIdle = 0;
 
     const targetProgress = () => {
       const rect = section.getBoundingClientRect();
@@ -87,35 +112,63 @@ export function InterviewScene() {
     if (header) headerObserver?.observe(header);
     syncHeader();
 
-    let preloaded = false;
+    // The section starts at the fold, so "nearly visible" is true on load. Building the 3D scene (a 1 MB
+    // bundle plus WebGL setup) waits instead until the page has loaded and the visitor pauses scrolling,
+    // or until the scene itself is on screen.
+    let built = false;
+    let idle = 0;
+    let lastScroll = 0;
+    const build = () => {
+      if (built) return;
+      built = true;
+      cancelIdle(idle);
+      SCREEN_IMAGES.forEach(src => { new Image().src = src; });
+      setStage(supportsWebGL() ? "webgl" : "fallback");
+    };
+    const buildWhenQuiet = () => {
+      idle = requestIdle(() => { if (performance.now() - lastScroll < QUIET_MS) buildWhenQuiet(); else build(); });
+    };
+    if ((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData !== true) {
+      if (document.readyState === "complete") buildWhenQuiet();
+      else window.addEventListener("load", buildWhenQuiet, { once: true });
+    }
     const visibility = new IntersectionObserver(([entry]) => {
-      setActive(entry.isIntersecting);
-      if (entry.isIntersecting && !preloaded) {
-        preloaded = true;
-        SCREEN_IMAGES.forEach(src => { new Image().src = src; });
-      }
-    }, { rootMargin: "600px 0px" });
-    visibility.observe(section);
+      const onScreen = entry.isIntersecting && entry.intersectionRatio >= VISIBLE_SHARE;
+      if (onScreen) build();
+      setActive(onScreen);
+    }, { threshold: [0, VISIBLE_SHARE] });
+    visibility.observe(stageElement);
+    const onScroll = () => {
+      lastScroll = performance.now();
+      setScrolling(true);
+      window.clearTimeout(scrollIdle);
+      scrollIdle = window.setTimeout(() => setScrolling(false), SCROLLING_MS);
+      schedule();
+    };
     configure();
-    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", schedule);
     reduced.addEventListener("change", configure);
     return () => {
       cancelAnimationFrame(frame);
+      cancelIdle(idle);
+      window.clearTimeout(scrollIdle);
       visibility.disconnect();
       headerObserver?.disconnect();
-      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("load", buildWhenQuiet);
+      window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", schedule);
       reduced.removeEventListener("change", configure);
     };
   }, []);
 
   return (
-    <section ref={root} id="see-it-work" className="isc" data-step="0" data-motion="full" aria-labelledby="isc-title">
-      <div className="isc-sticky">
+    <section ref={root} id="see-it-work" className="isc" data-step="0" data-motion="full" data-active={active ? "true" : "false"} data-scrolling={scrolling ? "true" : "false"} aria-labelledby="isc-title">
+      <div ref={sticky} className="isc-sticky">
         <div className="isc-backdrop" aria-hidden="true" />
         <div className="isc-stage" role="img" aria-label="A laptop runs a video interview. A phone on a stand beside it hears the interviewer's question, recognises it, and shows talking points from the candidate's resume.">
-          {canRender3D ? <SceneCanvas state={state} active={active} portal={htmlLayer as HtmlPortal} /> : <div className="isc-fallback" />}
+          {stage === "webgl" && <SceneCanvas state={state} active={active} scrolling={scrolling} portal={htmlLayer as HtmlPortal} />}
+          {stage === "fallback" && <div className="isc-fallback" />}
           <div ref={htmlLayer} className="isc-html-layer" />
         </div>
 

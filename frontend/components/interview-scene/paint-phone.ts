@@ -1,9 +1,11 @@
-import type { Phases } from "./timeline";
+import type { PhaseName, Phases } from "./timeline";
 import { ANSWER_PARTS, ANSWER_PART_STARTS, ANSWER_TITLE, ANSWER_WORD_COUNT, QUESTION, QUESTION_TYPE, QUESTION_WORD_COUNT, SOURCES } from "./script";
 import { SANS, clamp01, drawBars, drawWords, fillRound, layoutWords, strokeRound } from "./paint-utils";
 
 /** InterviewWin phone app painted onto the phone screen texture (CSS-pixel units). */
 export const PHONE_SIZE = { width: 330, height: 700, radius: 44 } as const;
+/** Every phase paintPhone reads. The screen is repainted (and re-uploaded) only when one of these changes. */
+export const PHONE_PHASES: readonly PhaseName[] = ["ask", "detect", "transcript", "answer", "source"];
 
 const PAD = 12;
 const PANEL_WIDTH = PHONE_SIZE.width - PAD * 2;

@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Boxes, Building2, Code2, Laptop, MonitorSmartphone, Repeat2, Smartphone, Sparkles, Timer, Video, Zap, Brain, FileText, Layers } from "lucide-react";
 import { COMPANIES } from "@/lib/companies";
 import { BRAND_MARKS } from "@/lib/brand-marks";
+import { InViewSection } from "./in-view-section";
 import "./home-proof.css";
 
 /** Infinite marquee: the list is rendered twice and the track slides by exactly one copy. */
@@ -50,7 +51,7 @@ function PlatformChip(brand: Brand) {
 /** Works next to any call or coding platform: capture is the microphone (plus tab audio on desktop). */
 export function HomePlatforms() {
   return (
-    <section className="hp-section hp-platforms" aria-labelledby="hp-platforms-title">
+    <InViewSection className="hp-section hp-platforms" aria-labelledby="hp-platforms-title">
       <div className="landing-container hp-head hp-reveal">
         <p className="hp-kicker"><MonitorSmartphone size={14} aria-hidden="true" /> Works where you interview</p>
         <h2 id="hp-platforms-title">Works alongside <em>every</em> interview platform.</h2>
@@ -65,7 +66,7 @@ export function HomePlatforms() {
         <li><Laptop size={18} aria-hidden="true" /><strong>0 installs</strong><span>runs in your browser</span></li>
         <li><Smartphone size={18} aria-hidden="true" /><strong>Laptop or phone</strong><span>built for both screens</span></li>
       </ul>
-    </section>
+    </InViewSection>
   );
 }
 
@@ -95,7 +96,7 @@ function MomentCard({ icon: Icon, tag, title, body }: (typeof MOMENTS)[number]) 
 export function HomeMoments() {
   const columns = [MOMENTS.slice(0, 3), MOMENTS.slice(3, 6), MOMENTS.slice(6, 9)];
   return (
-    <section className="hp-section hp-moments" aria-labelledby="hp-moments-title">
+    <InViewSection className="hp-section hp-moments" aria-labelledby="hp-moments-title">
       <div className="landing-container hp-head hp-head--dark hp-reveal">
         <p className="hp-kicker"><Sparkles size={14} aria-hidden="true" /> In the room with you</p>
         <h2 id="hp-moments-title">The moments it <em>saves you.</em></h2>
@@ -112,7 +113,7 @@ export function HomeMoments() {
         ))}
       </div>
       <div className="hp-wall-mobile"><Marquee seconds={48} label="Interview moments">{MOMENTS.map(moment => <MomentCard key={moment.title} {...moment} />)}</Marquee></div>
-    </section>
+    </InViewSection>
   );
 }
 
@@ -129,7 +130,7 @@ const COMPANY_BRANDS: Record<string, { slug?: string; color: string }> = {
 export function HomeCompanies() {
   const companies = COMPANIES.filter(company => company.name in COMPANY_BRANDS);
   return (
-    <section className="hp-section hp-companies" aria-labelledby="hp-companies-title">
+    <InViewSection className="hp-section hp-companies" aria-labelledby="hp-companies-title">
       <div className="landing-container hp-head hp-reveal">
         <p className="hp-kicker"><Building2 size={14} aria-hidden="true" /> Company-aware answers</p>
         <h2 id="hp-companies-title">Tuned for the company <em>you’re facing.</em></h2>
@@ -142,6 +143,6 @@ export function HomeCompanies() {
         <Marquee seconds={42} reverse label="Interview topics and rounds">{TOPICS.map(topic => <span key={topic} className="hp-topic">{topic}</span>)}</Marquee>
       </div>
       <p className="landing-container hp-footnote">Company names are shown to describe interview preparation only. InterviewWin is not affiliated with or endorsed by these companies.</p>
-    </section>
+    </InViewSection>
   );
 }

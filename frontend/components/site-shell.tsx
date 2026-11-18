@@ -8,7 +8,7 @@ import { SiteMotion } from "./site-motion";
 import { businessAddress, supportEmail, supportPhone } from "@/lib/site-content";
 
 const footerGroups = [
-  { title: "Product", links: [["Features", "/features"], ["How it works", "/how-it-works"], ["Pricing", "/plans"], ["Start live interview", "/interview?view=live"]] },
+  { title: "Product", links: [["Features", "/features"], ["How it works", "/how-it-works"], ["Pricing", "/plans"], ["Desktop app", "/download"], ["Start live interview", "/interview?view=live"]] },
   { title: "Resources", links: [["About", "/about"], ["Help center", "/help"], ["Contact Us", "/contact"]] },
   { title: "The essentials", links: [["Privacy Policy", "/privacy"], ["Terms & Conditions", "/terms"], ["Refunds & Cancellations", "/refund-policy"], ["Shipping & Delivery", "/shipping-policy"]] },
 ];

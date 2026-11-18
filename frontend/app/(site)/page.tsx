@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { ArrowRight, AudioLines, FileText, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { HomeDemo } from "@/components/home-demo";
@@ -10,6 +11,7 @@ import { InterviewScene } from "@/components/interview-scene/interview-scene";
 import { ShowcaseMotion } from "@/components/showcase-motion";
 import { ScrollMotion } from "@/components/scroll-motion";
 import { isBrowserWorkspace } from "@/lib/workspace-mode";
+import { desktopPlatformFrom } from "@/lib/desktop-download";
 import { PricingSection } from "@/components/pricing-section";
 import { legacyInterviewUrl } from "@/lib/interview-navigation";
 import "./home.css";
@@ -24,9 +26,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
   const query = await searchParams;
   if (typeof query.reset === "string" && query.reset || typeof query.billing === "string") redirect(legacyInterviewUrl(query));
   const browser = isBrowserWorkspace();
+  const requestHeaders = await headers();
+  const platform = desktopPlatformFrom(requestHeaders.get("user-agent"), requestHeaders.get("sec-ch-ua-platform"));
   return <ScrollMotion><ShowcaseMotion><div className="home-page">
     <section className="home-hero landing-container" data-scroll-scene>
-      <HomeHeroIntro />
+      <HomeHeroIntro platform={platform} />
       <InterviewScene />
       <div className="home-product-scroll" data-scroll-layer="hero"><HomeHero3D><div className="home-product-stage" data-reveal data-reveal-delay="100"><div className="home-stage-label"><span>YOUR EXPERIENCE → YOUR ANSWERS</span><span>Try a question below <ArrowRight size={14} /></span></div><HomeDemo /></div></HomeHero3D></div>
     </section>
@@ -40,6 +44,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
       <details><summary>When can I use live assistance?</summary><p>Use it only in interviews and meetings where all participants have agreed to AI assistance and the organizer’s rules allow it. You confirm consent before capture starts.</p></details>
       <details><summary>Where is my information stored?</summary><p>{browser ? "This version saves projects, readable source files, preferences, and opted-in session text in this browser on this device. It does not sync across devices. Clearing browser data removes it, so keep your original files." : "Your account stores uploaded sources and preferences. Session text is retained only when you choose to keep it. The app does not save raw audio recordings. Audio is processed live by the configured service."}</p></details>
       <details><summary>Can I use it on my phone?</summary><p>Yes. The interview screen adapts to smaller screens and supports microphone capture in compatible browsers. Live capture requires microphone permission and HTTPS. Mobile browsers generally cannot capture another app’s audio, and backgrounding the browser can interrupt capture.</p></details>
+      <details><summary>Is there a desktop app?</summary><p>Yes, for Windows and Mac. It keeps answers in a small window on top of your call, hears the interviewer through your computer’s audio, and can answer a question shown on your screen. It uses the same account and minutes as the website. <Link href="/download">Download the desktop app</Link>.</p></details>
       <details><summary>Will every answer be accurate?</summary><p>AI can make mistakes. Review suggestions and source references, use your own judgment, and only make claims about experience you actually have.</p></details>
     </div></section>
     <section className="home-final"><div className="landing-container" data-reveal><span className="home-final-icon"><AudioLines size={30} /></span><p className="home-kicker">BRING YOUR EXPERIENCE. FIND YOUR FLOW.</p><h2>Your story deserves<br /><em>a clear delivery.</em></h2><p>Take your first step toward a more focused conversation.</p><Link href="/interview?view=live" className="button button-primary">Start live interview <ArrowRight size={18} /></Link><small>Start with free interview minutes — no card needed.</small></div></section>

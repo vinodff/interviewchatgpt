@@ -375,6 +375,8 @@ html:has(.site-shell) { scroll-behavior: smooth; scroll-padding-top: 110px; }
 .site-signin { padding: 10px 6px; font-size: 14px; font-weight: 600; color: #173b30; }
 .site-header .site-open { min-height: 46px; padding-inline: 20px; border-radius: 12px; font-size: 14px; box-shadow: 0 12px 24px -16px rgba(18, 97, 74, .8); }
 .site-open-short { display: none; }
+/* Five links only fit beside the WhatsApp, Sign in and Start actions on wider screens; the menu and footer still list it. */
+@media (max-width: 1140px) { .site-desktop-nav .site-nav-wide { display: none; } }
 
 @media (max-width: 1000px) {
   .site-header-inner { gap: 14px; }
@@ -416,6 +418,43 @@ html:has(.site-shell) { scroll-behavior: smooth; scroll-padding-top: 110px; }
   .site-header .site-open { padding-inline: 11px; font-size: 12px; }
   .site-open svg { display: none; }
 }
+/* ---- Desktop app download ---- */
+.download-section { padding-bottom: 72px; }
+.download-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; max-width: 1020px; }
+.download-card { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; padding: 32px; background: #fff; border: 1px solid #dbe3d6; border-radius: 14px; }
+.download-card-current { background: #f1f6eb; border-color: #76a17b; box-shadow: inset 0 4px #447852; }
+.download-card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.download-card-icon { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 14px; background: var(--site-dark); color: #fff; }
+.download-card-badge { padding: 5px 11px; border: 1px solid #c1d4b5; border-radius: 999px; background: #fff; color: #2f6a47; font-size: 11px; font-weight: 600; }
+.download-card h2 { margin: 24px 0 8px; font-size: 29px; font-weight: 500; letter-spacing: -1px; }
+.download-card > p { margin-bottom: 26px; color: #60715f; font-size: 14px; line-height: 1.7; }
+.download-card .button { min-height: 50px; padding-inline: 22px; font-size: 14px; }
+.site-shell .download-card .button:hover svg:last-child { transform: translateY(2px); }
+.download-card small { margin-top: 12px; color: #657560; font-size: 11px; overflow-wrap: anywhere; }
+.download-heading h2, .download-install > h2 { margin-top: 14px; font-size: clamp(28px, 3vw, 36px); font-weight: 500; line-height: 1.2; letter-spacing: -1px; }
+.download-benefit-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px; padding-block: 32px 28px; }
+.download-benefit-grid article { min-width: 0; padding-top: 26px; border-top: 1px solid #dbe5d6; }
+.download-benefit-grid h3 { margin-bottom: 10px; font-size: 18px; font-weight: 600; line-height: 1.4; letter-spacing: -.3px; }
+.download-benefit-grid p { color: #5d705f; font-size: 14px; line-height: 1.8; }
+.download-footnote { display: flex; align-items: flex-start; gap: 10px; padding-bottom: 72px; color: #60715f; font-size: 12px; line-height: 1.8; }
+.download-footnote > svg { flex: none; margin-top: 3px; }
+.download-install { padding-bottom: 64px; }
+.download-install-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; max-width: 1020px; margin-top: 28px; }
+.download-install-grid article { min-width: 0; padding: 28px; border-radius: 14px; background: #f0f4eb; }
+.download-install-grid h3 { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; font-size: 18px; }
+.download-install-grid ol { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; counter-reset: install-step; color: #4f6352; font-size: 14px; line-height: 1.75; }
+.download-install-grid li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 12px; counter-increment: install-step; }
+.download-install-grid li::before { content: counter(install-step); display: grid; place-items: center; width: 26px; height: 26px; margin-top: -1px; border: 1px solid #c9d9c1; border-radius: 50%; background: #fff; color: #2f6a47; font-size: 12px; font-weight: 700; line-height: 1; }
+@media (max-width: 1000px) { .download-benefit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 680px) {
+  .download-options, .download-benefit-grid, .download-install-grid { grid-template-columns: minmax(0, 1fr); }
+  .download-section { padding-bottom: 48px; }
+  .download-card, .download-install-grid article { padding: 24px; }
+  .download-card .button { width: 100%; white-space: normal; }
+  .download-benefit-grid { gap: 10px; }
+  .download-footnote { padding-bottom: 48px; }
+}
+
 @keyframes site-menu-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
 @keyframes site-menu-item { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes site-fade { from { opacity: 0; } to { opacity: 1; } }

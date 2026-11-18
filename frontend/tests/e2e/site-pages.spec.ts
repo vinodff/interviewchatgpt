@@ -6,6 +6,7 @@ const pages = [
   ["plans", "Pay once. Use it when the call comes."],
   ["about", "Good work deserves clear words."],
   ["help", "A little help, right here."],
+  ["download", "Your answers, right beside the call."],
   ["contact", "Let’s find the next step."],
   ["privacy", "Privacy Policy"],
   ["terms", "Terms & Conditions"],
@@ -56,11 +57,13 @@ test("help search, topic filters, empty state, and recovery are usable", async (
   await page.goto("/help");
   await page.getByRole("button", { name: "Audio & devices", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("3 answers");
+  await page.getByRole("button", { name: "Desktop app", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("3 answers");
   await page.getByRole("button", { name: "All topics", exact: true }).click();
   await page.getByRole("searchbox", { name: "Search help articles" }).fill("passwordzzzz");
   await expect(page.getByRole("heading", { name: "No matching articles yet." })).toBeVisible();
   await page.getByRole("button", { name: "Show all topics" }).click();
-  await expect(page.getByRole("status")).toContainText("10 answers");
+  await expect(page.getByRole("status")).toContainText("13 answers");
   await page.getByRole("searchbox", { name: "Search help articles" }).fill("microphone access");
   await page.getByText("Why can’t the website hear me?", { exact: true }).click();
   await expect(page.locator("details[open]")).toContainText("site settings");

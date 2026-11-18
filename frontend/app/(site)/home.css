@@ -6,10 +6,17 @@
 
 /* Premium hero 3D (ux/simplify-live-and-homepage): perspective stage + floating icon chips */
 .home-hero-3d { perspective: 1200px; position: relative; }
+.home-hero-3d-scroll, .home-hero-3d-tilt { transform-style: preserve-3d; will-change: transform; }
+.home-hero-3d-scroll { transform: rotateX(8deg); }
 .home-product-stage { transform-style: preserve-3d; }
 .home-floaters { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
 .home-floater { position: absolute; display: inline-flex; align-items: center; gap: 7px; background: #fff; border: 1px solid #dbe5d2; border-radius: 999px; box-shadow: 0 14px 30px -18px #173b3066; padding: 8px 13px; font-size: 11px; font-weight: 600; color: #456d38; white-space: nowrap; }
 .home-floater svg { color: #477345; }
+.home-floater { animation: home-floater-bob var(--bob-duration, 4.5s) ease-in-out infinite; }
+.home-floater-audio { animation: home-floater-pulse 3.2s ease-in-out infinite; }
+.home-hero-3d:not(.is-in-view) .home-floater { animation-play-state: paused; }
+@keyframes home-floater-bob { 50% { translate: 0 -12px; rotate: var(--bob-tilt, -3deg); } }
+@keyframes home-floater-pulse { 50% { scale: 1.08; } }
 .floater-left { left: -18px; top: 18%; }
 .floater-right { right: -14px; top: 32%; }
 .floater-bottom-left { left: 6%; bottom: -14px; }
@@ -18,4 +25,14 @@
 .home-floater-audio { left: 22%; top: 44%; background: #173d31; color: #d3e2c6; border-color: #173d31; }
 .home-floater-audio svg { color: #bad19f; }
 @media (max-width: 1000px) { .home-floaters { display: none; } }
-@media (prefers-reduced-motion: reduce) { .home-floaters { display: none; } }
+@media (prefers-reduced-motion: reduce) { .home-floaters { display: none; } .home-hero-3d-scroll { transform: none; } }
+/* Skip layout and paint for off-screen marketing blocks; the pinned 3D scene is excluded on purpose. */
+.home-page .hp-section,
+.home-page .home-showcase,
+.home-page .home-process,
+.home-page .pricing-section,
+.home-page .landing-faq,
+.home-page .home-final {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 720px;
+}

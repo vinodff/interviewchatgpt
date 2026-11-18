@@ -111,9 +111,34 @@ window after it loads and quits (it reads the page directly, so it works with co
 
   These are the same public `NEXT_PUBLIC_SUPABASE_*` values the website already ships.
 
-## Package an installer
+## Release the installers
 
-```bash
-npm run build:win   # NSIS installer in dist/
-npm run build:mac   # dmg in dist/ (build on macOS)
-```
+The website's download buttons (`/download/windows`, `/download/mac`) point at the latest GitHub
+release, so publishing a release is all it takes to ship a new version:
+
+1. One time: in GitHub → *Settings → Secrets and variables → Actions → Variables*, add
+   `DESKTOP_SUPABASE_ANON_KEY`, the same public value as the website's `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+   The build refuses a secret or service-role key, because anyone can read a key packaged in the app.
+2. Set `version` in `package.json`, commit and push, then tag that commit and push the tag:
+
+   ```bash
+   git tag desktop-v1.2.0
+   git push origin desktop-v1.2.0
+   ```
+
+3. The *Desktop release* workflow builds `InterviewWin-Windows-Setup.exe` and `InterviewWin-Mac.dmg`
+   (one file for Apple silicon and Intel) and publishes them. Run it by hand from the Actions tab for
+   test builds that are not published.
+
+Unsigned installers work, but Windows SmartScreen and macOS warn the first time they open; the
+download page and help center explain how to continue. To sign them, add these repository secrets:
+
+- **Mac:** `MAC_CSC_LINK` (a base64 Developer ID Application `.p12`) and `MAC_CSC_KEY_PASSWORD`, plus
+  `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` to notarize.
+- **Windows:** `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`.
+
+Once the apps are signed, remove the "Run anyway" and "Open Anyway" steps from the website. To host
+the files somewhere else, set `DESKTOP_WINDOWS_DOWNLOAD_URL` and `DESKTOP_MAC_DOWNLOAD_URL` on the website.
+
+Local builds: `npm run build:win` on Windows, and `npm run build:mac` on a Mac (add
+`-- --config.mac.identity=-` when there is no Developer ID certificate).

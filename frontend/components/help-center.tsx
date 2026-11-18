@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Search } from "lucide-react";
 import { helpItems } from "@/lib/site-content";
 
-const categories = ["All topics", "Getting started", "Audio & devices", "Privacy & access"] as const;
+const categories = ["All topics", "Getting started", "Audio & devices", "Desktop app", "Privacy & access"] as const;
 
 export function HelpCenter() {
   const [query, setQuery] = useState("");

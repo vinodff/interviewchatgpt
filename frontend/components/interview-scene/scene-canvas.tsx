@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { ContactShadows, Environment, Grid, Html, Lightformer, Sparkles as SparkleField } from "@react-three/drei";
 import { AdditiveBlending, Group, MathUtils, Mesh, MeshBasicMaterial, PerspectiveCamera, PointLight, Vector3 } from "three";
@@ -139,7 +139,7 @@ function Chips({ portal }: { portal: HtmlPortal }) {
   );
 }
 
-/** Glowing floor grid fading into the dark, plus slow drifting light particles. */
+/** Glowing floor grid fading into the dark, plus a few drifting light particles. */
 function Atmosphere() {
   return (
     <>
@@ -156,9 +156,32 @@ function Atmosphere() {
         fadeDistance={24}
         fadeStrength={2.2}
       />
-      <SparkleField count={70} scale={[14, 6, 10]} position={[0.6, 2.4, -1]} size={2.2} speed={0.25} opacity={0.45} color="#9be8bf" noise={0.6} />
+      {/* Kept mounted: toggling this on scroll remounted shaders and caused ~1s hitches. Demand frameloop already skips idle draws while scrolling. */}
+      <SparkleField count={18} scale={[14, 6, 10]} position={[0.6, 2.4, -1]} size={2.2} speed={0.25} opacity={0.4} color="#9be8bf" noise={0.6} />
     </>
   );
+}
+
+/**
+ * While the visitor scrolls, frames are demand-driven (one per progress update). When they pause,
+ * keep the loop running so speaking bars, ripples and sparkles can move.
+ */
+function FramePolicy({ state, active, scrolling }: { state: StateRef; active: boolean; scrolling: boolean }) {
+  const invalidate = useThree(three => three.invalidate);
+  useEffect(() => {
+    if (!active) {
+      delete state.current.requestFrame;
+      return;
+    }
+    state.current.requestFrame = () => invalidate();
+    invalidate();
+    return () => { delete state.current.requestFrame; };
+  }, [state, active, invalidate]);
+  useFrame(() => {
+    if (!active || scrolling) return;
+    invalidate();
+  });
+  return null;
 }
 
 function Studio() {
@@ -173,20 +196,44 @@ function Studio() {
   );
 }
 
-type Props = { state: StateRef; active: boolean; portal: HtmlPortal };
+/**
+ * Compiles every material's shader before the first frame. With KHR_parallel_shader_compile the GPU does
+ * that off the main thread; compiling during the first render instead froze the page for most of a second.
+ */
+function ShaderWarmUp({ onReady }: { onReady: (ready: boolean) => void }) {
+  const { gl, scene, camera, advance } = useThree();
+  useEffect(() => {
+    let cancelled = false;
+    gl.compileAsync(scene, camera).catch(() => undefined).then(() => {
+      if (cancelled) return;
+      // One frame now, usually while the visitor is still above the scene, so the environment light,
+      // contact shadow and both screens already exist when it scrolls into view.
+      advance(performance.now());
+      onReady(true);
+    });
+    return () => { cancelled = true; };
+  }, [gl, scene, camera, advance, onReady]);
+  return null;
+}
 
-export default function SceneCanvas({ state, active, portal }: Props) {
+type Props = { state: StateRef; active: boolean; scrolling: boolean; portal: HtmlPortal };
+
+export default function SceneCanvas({ state, active, scrolling, portal }: Props) {
+  const [ready, setReady] = useState(false);
   return (
     <Canvas
       className="isc-canvas"
-      frameloop={active ? "always" : "never"}
-      dpr={[1, 1.75]}
-      gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
+      // Demand while scrolling (InterviewScene calls requestFrame on each progress tick). Always when idle so effects keep moving.
+      frameloop={active && ready ? "demand" : "never"}
+      // Fixed DPR: toggling it on every scroll start/stop resized the drawing buffer and caused hitches.
+      dpr={[1, 1.15]}
+      gl={{ antialias: false, alpha: true, powerPreference: "high-performance" }}
       camera={{ fov: 30, near: 0.1, far: 60, position: [5.6, 6.4, 7.6] }}
     >
       <ambientLight intensity={0.25} />
       <directionalLight position={[4, 7, 5]} intensity={1.1} />
       <Studio />
+      <FramePolicy state={state} active={active && ready} scrolling={scrolling} />
       <CameraRig state={state} />
       <group>
         <Laptop state={state} />
@@ -195,8 +242,10 @@ export default function SceneCanvas({ state, active, portal }: Props) {
         <ScreenGlow state={state} />
         <Chips portal={portal} />
       </group>
-      <ContactShadows position-y={0} scale={14} blur={2.6} far={3} opacity={0.75} resolution={256} color="#000000" />
+      {/* Drawn once: re-rendering the depth pass and blur every frame cost more than the lid's moving shadow is worth. */}
+      <ContactShadows frames={1} position-y={0} scale={14} blur={2.4} far={3} opacity={0.7} resolution={128} color="#000000" />
       <Atmosphere />
+      <ShaderWarmUp onReady={setReady} />
     </Canvas>
   );
 }

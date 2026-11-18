@@ -1,9 +1,11 @@
-import type { Phases } from "./timeline";
+import type { PhaseName, Phases } from "./timeline";
 import { INTERVIEWER, MEETING_TITLE, QUESTION, QUESTION_WORD_COUNT } from "./script";
 import { SANS, clamp01, drawBars, drawCover, drawWords, fillRound, layoutWords, strokeRound } from "./paint-utils";
 
 /** Video-call UI painted onto the laptop screen texture (CSS-pixel units; the surface scales for sharpness). */
 export const CALL_SIZE = { width: 1144, height: 716 } as const;
+/** Every phase paintCall reads. The screen is repainted (and re-uploaded) only when one of these changes. */
+export const CALL_PHASES: readonly PhaseName[] = ["screen", "ask", "detect", "answer"];
 
 const TOP_BAR = 54;
 const BOTTOM_BAR = 70;

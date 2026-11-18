@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, type RefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import { CanvasTexture, SRGBColorSpace } from "three";
-import type { Phases } from "./timeline";
+import type { PhaseName, Phases } from "./timeline";
 
 type SceneStateLike = { progress: number; phases: Phases };
 
@@ -12,6 +12,8 @@ export type ScreenPainter = (ctx: CanvasRenderingContext2D, phases: Phases, time
 type Props = {
   state: RefObject<SceneStateLike>;
   paint: ScreenPainter;
+  /** The phases `paint` reads; changes to any other phase never repaint this screen. */
+  watches: readonly PhaseName[];
   /** Logical (CSS-pixel) size the painter draws in. */
   pixels: { width: number; height: number };
   /** Device pixels per logical pixel — higher keeps text sharp in close-ups. */
@@ -27,6 +29,8 @@ type Props = {
 };
 
 const PHASE_PRECISION = 3;
+/** Each repaint re-uploads the whole screen to the GPU, so scrolling may not repaint every display frame. */
+const MAX_REPAINTS_PER_SECOND = 30;
 
 /** Tells three.js to re-upload the canvas to the GPU on the next render. */
 function queueUpload(map: CanvasTexture) {
@@ -37,7 +41,7 @@ function queueUpload(map: CanvasTexture) {
  * A screen painted with Canvas 2D and mapped onto a plane as a texture, so it is part of the 3D scene:
  * perfectly aligned to its device, correctly occluded, and lit by nothing (it is emissive, like a real display).
  */
-export function ScreenSurface({ state, paint, pixels, resolution, size, position, animationFps, version = 0, isTransparent = false }: Props) {
+export function ScreenSurface({ state, paint, watches, pixels, resolution, size, position, animationFps, version = 0, isTransparent = false }: Props) {
   const { canvas, texture } = useMemo(() => {
     const element = document.createElement("canvas");
     element.width = Math.round(pixels.width * resolution);
@@ -48,17 +52,21 @@ export function ScreenSurface({ state, paint, pixels, resolution, size, position
     return { canvas: element, texture: map };
   }, [pixels.width, pixels.height, resolution]);
   const lastKey = useRef("");
+  const lastPaint = useRef(-Infinity);
 
   useEffect(() => () => texture.dispose(), [texture]);
   useEffect(() => { lastKey.current = ""; }, [version]);
 
   useFrame(({ clock }) => {
     const { phases } = state.current;
+    const now = clock.elapsedTime;
     const fps = animationFps(phases);
-    const tick = fps > 0 ? Math.floor(clock.elapsedTime * fps) : 0;
-    const key = `${Object.values(phases).map(value => value.toFixed(PHASE_PRECISION)).join(",")}|${tick}|${version}`;
-    if (key === lastKey.current) return;
+    const tick = fps > 0 ? Math.floor(now * fps) : 0;
+    const key = `${watches.map(name => phases[name].toFixed(PHASE_PRECISION)).join(",")}|${tick}|${version}`;
+    // A skipped change is still pending (lastKey is unchanged), so the final state always gets painted.
+    if (key === lastKey.current || now - lastPaint.current < 1 / MAX_REPAINTS_PER_SECOND) return;
     lastKey.current = key;
+    lastPaint.current = now;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(resolution, 0, 0, resolution, 0, 0);

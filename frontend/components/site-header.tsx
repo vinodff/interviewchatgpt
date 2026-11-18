@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { ArrowRight, CircleHelp, CreditCard, Info, Mail, Menu, Sparkles, Workflow, X } from "lucide-react";
+import { ArrowRight, CircleHelp, CreditCard, Info, Mail, Menu, MonitorDown, Sparkles, Workflow, X } from "lucide-react";
 import { Brand } from "./brand";
 import { WHATSAPP_CHANNEL_URL, WhatsAppIcon } from "./whatsapp";
 
@@ -12,6 +12,7 @@ const navigation = [
   { href: "/how-it-works", label: "How it works", icon: Workflow },
   { href: "/plans", label: "Pricing", icon: CreditCard },
   { href: "/help", label: "Help", icon: CircleHelp },
+  { href: "/download", label: "Download", icon: MonitorDown, wideOnly: true },
 ];
 const mobileNavigation = [...navigation, { href: "/about", label: "About", icon: Info }, { href: "/contact", label: "Contact Us", icon: Mail }];
 
@@ -42,7 +43,7 @@ export function SiteHeader() {
   return <header className={headerClass}>
     <div className="landing-container site-header-inner">
       <Link href="/" className="landing-brand" aria-label="InterviewWin home" onClick={closeMenu}><Brand /></Link>
-      <nav className="site-desktop-nav" aria-label="Main navigation">{navigation.map(item => <Link key={item.href} href={item.href} aria-current={pathname === item.href ? "page" : undefined}>{item.label}</Link>)}</nav>
+      <nav className="site-desktop-nav" aria-label="Main navigation">{navigation.map(item => <Link key={item.href} href={item.href} className={item.wideOnly ? "site-nav-wide" : undefined} aria-current={pathname === item.href ? "page" : undefined}>{item.label}</Link>)}</nav>
       <a className="site-header-whatsapp" href={WHATSAPP_CHANNEL_URL} target="_blank" rel="noopener noreferrer" aria-label="Join our WhatsApp channel" title="Join our WhatsApp channel"><WhatsAppIcon size={19} /></a>
       <Link className="site-signin" href="/interview">Sign in</Link>
       <Link className="button button-primary site-open" href="/interview?view=live" aria-label="Start live interview"><span className="site-open-long">Start live interview</span><span className="site-open-short">Start free</span> <ArrowRight size={16} aria-hidden="true" /></Link>

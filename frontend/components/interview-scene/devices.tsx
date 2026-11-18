@@ -4,13 +4,18 @@ import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from "reac
 import { useFrame, useThree } from "@react-three/fiber";
 import { RoundedBox } from "@react-three/drei";
 import { Group, InstancedMesh, Matrix4 } from "three";
-import { CALL_SIZE, callIsAnimating, paintCall } from "./paint-call";
-import { PHONE_SIZE, paintPhone, phoneIsAnimating } from "./paint-phone";
+import { CALL_PHASES, CALL_SIZE, callIsAnimating, paintCall } from "./paint-call";
+import { PHONE_PHASES, PHONE_SIZE, paintPhone, phoneIsAnimating } from "./paint-phone";
 import { screenImage } from "./paint-utils";
 import { ScreenSurface, type ScreenPainter } from "./screen-surface";
 import { easeOutBack, type Phases } from "./timeline";
 
-export type SceneState = { progress: number; phases: Phases };
+export type SceneState = {
+  progress: number;
+  phases: Phases;
+  /** Ask the WebGL canvas for one more frame (used with frameloop="demand" while the visitor scrolls). */
+  requestFrame?: () => void;
+};
 /** Fixed container for the floating <Html> chips. Without it drei re-targets mid-mount and drops a layer. */
 export type HtmlPortal = RefObject<HTMLElement>;
 type StateRef = RefObject<SceneState>;
@@ -119,8 +124,9 @@ export function Laptop({ state }: DeviceProps) {
           <ScreenSurface
             state={state}
             paint={paint}
+            watches={CALL_PHASES}
             pixels={CALL_SIZE}
-            resolution={compact ? 1.1 : 1.6}
+            resolution={compact ? 1 : 1.25}
             size={LAPTOP_SCREEN}
             position={[0, 0, LAPTOP.lidDepth / 2 + 0.003]}
             animationFps={(phases: Phases) => (callIsAnimating(phases) ? ANIMATION_FPS : 0)}
@@ -166,8 +172,9 @@ export function PhoneOnStand({ state }: DeviceProps) {
         <ScreenSurface
           state={state}
           paint={paintPhone}
+          watches={PHONE_PHASES}
           pixels={PHONE_SIZE}
-          resolution={compact ? 2 : 2.6}
+          resolution={compact ? 1.6 : 2}
           size={PHONE_SCREEN}
           position={[0, 0, PHONE.depth / 2 + 0.003]}
           animationFps={(phases: Phases) => (phoneIsAnimating(phases) ? ANIMATION_FPS : 0)}

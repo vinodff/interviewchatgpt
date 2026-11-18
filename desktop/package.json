@@ -37,17 +37,29 @@
     },
     "mac": {
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
       ],
       "category": "public.app-category.productivity",
       "icon": "assets/icon.png",
+      "minimumSystemVersion": "13.0",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "InterviewWin listens to the conversation to suggest answers while your session is live."
       }
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "InterviewWin-Windows-Setup.${ext}"
+    },
+    "dmg": {
+      "artifactName": "InterviewWin-Mac.${ext}"
     }
   },
   "dependencies": {

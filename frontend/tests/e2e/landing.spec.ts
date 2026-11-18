@@ -13,6 +13,7 @@ test('landing adapts to screen sizes and opens the workspace', async ({ page }) 
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
     await page.screenshot({ path: `../artifacts/ui/landing-${width}.png`, fullPage: true, animations: 'disabled' });
   }
+  await expect(page.locator('.hhi-actions .hhi-secondary')).toHaveAttribute('href', /^\/download(\/(windows|mac))?$/);
   await page.locator('.landing-actions').getByRole('link', { name: 'Start live interview', exact: true }).click();
   await expect(page).toHaveURL(/\/interview\?view=live$/);
   await expect(page.locator('.workspace, .auth-page')).toBeVisible();

@@ -13,6 +13,10 @@
 .hp-track { display: flex; width: max-content; animation: hp-slide var(--hp-duration, 40s) linear infinite; will-change: transform; }
 .hp-marquee--reverse .hp-track { animation-direction: reverse; }
 .hp-marquee:hover .hp-track, .hp-marquee:focus-within .hp-track { animation-play-state: paused; }
+/* Off-screen sections pause marquees so scroll through the 3D scene is not fighting six infinite tracks. */
+.hp-section:not([data-inview="true"]) .hp-track,
+.hp-section:not([data-inview="true"]) .hp-column-track,
+.hp-section:not([data-inview="true"]) .hp-head h2 em { animation-play-state: paused; }
 .hp-set { display: flex; gap: var(--hp-gap); padding-right: var(--hp-gap); }
 
 .hp-platform { display: inline-flex; align-items: center; gap: 12px; padding: 12px 22px 12px 12px; border: 1px solid #e0e8dc; border-radius: 16px; background: #fff; color: var(--hp-ink); font-size: 17px; font-weight: 600; white-space: nowrap; box-shadow: 0 10px 26px -20px rgba(23, 59, 48, .45); transition: transform .35s var(--hp-ease), box-shadow .35s var(--hp-ease), border-color .2s; }

@@ -1,0 +1,110 @@
+name: Desktop release
+# Builds InterviewWin-Windows-Setup.exe and InterviewWin-Mac.dmg (Apple silicon and Intel in one file).
+# Pushing a tag such as desktop-v1.2.0 publishes both to a GitHub release; the website's
+# /download/windows and /download/mac links always point at the latest release.
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    name: Build for ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - name: Windows
+            runner: windows-latest
+            artifact: windows-installer
+            file: InterviewWin-Windows-Setup.exe
+          - name: Mac
+            runner: macos-latest
+            artifact: mac-installer
+            file: InterviewWin-Mac.dmg
+    defaults:
+      run:
+        working-directory: desktop
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: Check the tag matches the app version
+        if: github.ref_type == 'tag'
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "desktop-v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match desktop/package.json version $version. Tag desktop-v$version instead."
+            exit 1
+          fi
+      - name: Write the sign-in config
+        env:
+          DESKTOP_SUPABASE_URL: ${{ vars.DESKTOP_SUPABASE_URL }}
+          DESKTOP_SUPABASE_ANON_KEY: ${{ vars.DESKTOP_SUPABASE_ANON_KEY || secrets.DESKTOP_SUPABASE_ANON_KEY }}
+        run: node scripts/release-config.js
+      - name: Build the Windows installer
+        if: runner.os == 'Windows'
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if [ -z "$WIN_CSC_LINK" ]; then
+            echo "::warning::No code-signing certificate (WIN_CSC_LINK), so Windows SmartScreen warns the first time the installer runs."
+            unset WIN_CSC_LINK WIN_CSC_KEY_PASSWORD
+          fi
+          npx electron-builder --win --publish never
+      - name: Build the Mac disk image
+        if: runner.os == 'macOS'
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$CSC_LINK" ]; then
+            npx electron-builder --mac --publish never
+          else
+            # Apple silicon refuses unsigned code, so without a Developer ID the app is ad-hoc signed.
+            echo "::warning::No Developer ID certificate (MAC_CSC_LINK), so the app is ad-hoc signed and not notarized. Mac users must allow it once in System Settings > Privacy & Security."
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            npx electron-builder --mac --publish never --config.mac.identity=-
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: desktop/dist/${{ matrix.file }}
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: installers
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" installers/*/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "InterviewWin desktop ${GITHUB_REF_NAME#desktop-v}" \
+            --notes "Windows 10 or 11: InterviewWin-Windows-Setup.exe. macOS 13 or later, Apple silicon and Intel: InterviewWin-Mac.dmg." \
+            --latest

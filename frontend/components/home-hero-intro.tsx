@@ -1,7 +1,9 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import { ArrowRight, FileText, Gift, Play, ShieldCheck } from "lucide-react";
+import { ArrowRight, FileText, Gift, MonitorDown, ShieldCheck } from "lucide-react";
 import { BRAND_MARKS } from "@/lib/brand-marks";
+import type { DesktopPlatform } from "@/lib/desktop-download";
+import { DesktopDownloadButton } from "./desktop-download";
 import { HomeHeroFloat } from "./home-hero-float";
 import { WHATSAPP_CHANNEL_URL, WhatsAppIcon } from "./whatsapp";
 import "./home-hero-intro.css";
@@ -37,8 +39,8 @@ function TrustRow() {
   );
 }
 
-/** Home hero: trust row, headline, two actions, floating app tiles. */
-export function HomeHeroIntro() {
+/** Home hero: trust row, headline, start and download actions, floating app tiles. */
+export function HomeHeroIntro({ platform }: { platform: DesktopPlatform | null }) {
   return (
     <div className="home-hero-heading hhi">
       <div className="hhi-glow" aria-hidden="true"><i /><i /><i /></div>
@@ -52,10 +54,11 @@ export function HomeHeroIntro() {
         <p className="home-intro hhi-intro">It hears the question, pulls from your resume, and puts a clear, confident answer on your screen in seconds, so you stay calm and sound like yourself at your best.</p>
         <div className="landing-actions hhi-actions">
           <Link href="/interview?view=live" className="button button-primary hhi-cta">Start live interview <ArrowRight size={18} /></Link>
-          <a href="#see-it-work" className="hhi-secondary"><span className="hhi-play"><Play size={13} fill="currentColor" aria-hidden="true" /></span> See how it works</a>
+          <DesktopDownloadButton platform={platform} className="hhi-secondary" iconClassName="hhi-os" />
         </div>
         <p className="hhi-fineprint">
           <span><ShieldCheck size={14} aria-hidden="true" /> Use with everyone’s permission</span>
+          {platform && <Link href="/download"><MonitorDown size={15} aria-hidden="true" /> Desktop app for Windows &amp; Mac</Link>}
           <a href={WHATSAPP_CHANNEL_URL} target="_blank" rel="noopener noreferrer"><WhatsAppIcon size={15} /> Join our WhatsApp channel</a>
         </p>
       </div>
