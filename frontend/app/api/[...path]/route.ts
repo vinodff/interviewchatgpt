@@ -14,19 +14,38 @@ import {
   setSessionCookie
 } from "@/lib/server-supabase";
 import { chargeSession, type BillableSession } from "@/lib/session-usage";
+import { analyzeScreenWithGemini, MAX_SCREEN_IMAGE_BASE64, validScreenImage } from "@/lib/server-analyze";
 
 export const maxDuration = 30;
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const limits = new Map<string, { count: number; expires: number }>();
 
-function limited(request: NextRequest, transcription = false, ticket = false): boolean {
+type LimitKind = "answer" | "audio" | "ticket" | "analyze";
+const LIMIT_PER_MINUTE: Record<LimitKind, number> = { answer: 30, audio: 60, ticket: 4, analyze: 8 };
+const LIVE_ROUTES = ["live/answer", "live/transcribe", "live/speech-ticket", "live/analyze"];
+const BODY_LIMIT: Record<string, number> = { "live/speech-ticket": 2048, "live/transcribe": 400000, "live/analyze": MAX_SCREEN_IMAGE_BASE64 + 100000 };
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function limitKind(path: string): LimitKind {
+  return path === "live/transcribe" ? "audio" : path === "live/speech-ticket" ? "ticket" : path === "live/analyze" ? "analyze" : "answer";
+}
+
+/** Per-minute limit by client address, or by account when `account` is given (headers can't spoof that). */
+function limited(request: NextRequest, kind: LimitKind, account?: string): boolean {
   const now = Date.now();
   for (const [key, value] of limits) if (value.expires <= now) limits.delete(key);
-  const key = `${ticket ? "ticket" : transcription ? "audio" : "answer"}:${request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for")?.split(",")[0] || "unknown"}`;
+  const key = `${kind}:${account ? `account:${account}` : request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for")?.split(",")[0] || "unknown"}`;
   const value = limits.get(key) || { count: 0, expires: now + 60000 };
   if (limits.size >= 1000 && !limits.has(key)) return true;
   value.count++; limits.set(key, value);
-  return value.count > (ticket ? 4 : transcription ? 60 : 30);
+  return value.count > LIMIT_PER_MINUTE[kind];
+}
+
+/** Optional `sources=` filter for knowledge search: at most 20 well-formed ids, otherwise ignored. */
+function sourceFilter(value: string | null): string[] | null {
+  if (!value) return null;
+  const ids = value.split(",").map(id => id.trim()).filter(id => UUID.test(id)).slice(0, 20);
+  return ids.length ? ids : null;
 }
 
 async function handle(request: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
@@ -43,7 +62,7 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
     if (request.method === "GET" && path === "health") {
       return json({ status: "ok", database: "this browser", redis: "not used", ai_configured: Boolean(process.env.GEMINI_API_KEY), billing_configured: false });
     }
-    if (!["live/answer", "live/transcribe", "live/speech-ticket", "provider/check"].includes(path)) {
+    if (![...LIVE_ROUTES, "provider/check"].includes(path)) {
       return json({ detail: "Browser workspace data is stored on this device. This server route is unavailable." }, 404);
     }
   }
@@ -434,14 +453,17 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
   if (request.method === "GET" && path === "knowledge/search") {
     if (!serverSupabase) return json([]);
     const auth = await getAuthenticatedUser(request);
-    const query = new URL(request.url).searchParams.get("q") || "";
+    const searchParams = new URL(request.url).searchParams;
+    const query = searchParams.get("q") || "";
     if (!auth || !query.trim()) return json([]);
-    const { data: chunks } = await serverSupabase
+    const onlySources = sourceFilter(searchParams.get("sources"));
+    let search = serverSupabase
       .from("chunks")
       .select("id, source_id, project_id, text, locator")
       .eq("user_id", auth.authId)
-      .ilike("text", `%${query.trim()}%`)
-      .limit(5);
+      .ilike("text", `%${query.trim()}%`);
+    if (onlySources) search = search.in("source_id", onlySources);
+    const { data: chunks } = await search.limit(5);
     return json((chunks || []).map(c => ({
       id: c.id,
       source_id: c.source_id,
@@ -455,7 +477,7 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
   }
 
   // 8. Live AI routes: live/answer, live/transcribe, live/speech-ticket, provider/check
-  if (!["live/answer", "live/transcribe", "live/speech-ticket", "provider/check"].includes(path)) {
+  if (![...LIVE_ROUTES, "provider/check"].includes(path)) {
     return json({ detail: "This server route is unavailable." }, 404);
   }
 
@@ -468,13 +490,20 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
   if (request.headers.get("X-InterviewPilot") !== "1" || request.headers.get("sec-fetch-site") === "cross-site" || !trustedOrigin) {
     return json({ detail: "Open the workspace on this site to use the AI service." }, 403);
   }
-  if (limited(request, path === "live/transcribe", path === "live/speech-ticket")) return json({ detail: "Too many requests. Wait a minute and try again." }, 429);
+  if (limited(request, limitKind(path))) return json({ detail: "Too many requests. Wait a minute and try again." }, 429);
   if (!process.env.GEMINI_API_KEY) return json({ detail: "The AI provider is not configured. Add GEMINI_API_KEY on the server." }, 503);
   if (path === "provider/check" && request.method === "GET") {
     const answer = await generateAnswerWithGemini("What is a hash map? Reply in one short sentence.");
     return answer?.answer ? json({ ok: true, detail: "The AI provider responded successfully." }) : json({ detail: "The AI provider did not respond. Check its key, model access, and quota." }, 503);
   }
-  if (!["live/answer", "live/transcribe", "live/speech-ticket"].includes(path) || request.method !== "POST") return json({ detail: "Method not allowed." }, 405);
+  if (!LIVE_ROUTES.includes(path) || request.method !== "POST") return json({ detail: "Method not allowed." }, 405);
+  if (path === "live/analyze") {
+    // Screen analysis calls the paid vision model: always a signed-in account with minutes left, limited per account.
+    const auth = serverSupabase ? await getAuthenticatedUser(request) : null;
+    if (!auth) return json({ detail: "Sign in is required." }, 401);
+    if (auth.user.minute_limit !== null && auth.user.minute_limit - auth.user.minutes_used <= 0) return json({ detail: "You have no live minutes left. Add minutes to use Analyze." }, 402);
+    if (limited(request, "analyze", auth.authId)) return json({ detail: "Too many screen analyses. Wait a minute and try again." }, 429);
+  }
 
   // Limit actual bytes as well as Content-Length before parsing untrusted JSON.
   const reader = request.body?.getReader();
@@ -483,7 +512,7 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
   while (true) {
     const { done, value } = await reader.read(); if (done) break;
     size += value.byteLength;
-    if (size > (path === "live/speech-ticket" ? 2048 : path === "live/transcribe" ? 400000 : 100000)) { await reader.cancel(); return json({ detail: "Request context is too large." }, 413); }
+    if (size > (BODY_LIMIT[path] ?? 100000)) { await reader.cancel(); return json({ detail: "Request context is too large." }, 413); }
     parts.push(value);
   }
   let body: Record<string, unknown>;
@@ -497,6 +526,30 @@ async function handle(request: NextRequest, { params }: { params: Promise<{ path
     if (Object.keys(body).length) return json({ detail: "Speech configuration is managed by the server." }, 400);
     const ticket = await createSpeechTicket(request.signal);
     return ticket ? json(ticket) : json({ detail: "Streaming recognition is unavailable. Select Enhanced microphone and restart." }, 503);
+  }
+
+  if (path === "live/analyze") {
+    const image = validScreenImage(body.image, body.mime);
+    if (!image) return json({ detail: "Send one JPEG or PNG screenshot of at most about 3 MB." }, 400);
+    if (body.preferences !== undefined && (!body.preferences || typeof body.preferences !== "object" || Array.isArray(body.preferences))) return json({ detail: "Preferences must be an object." }, 400);
+    const context = body.interview_context === undefined ? null : sanitizeInterviewContext(body.interview_context);
+    if (body.interview_context !== undefined && !context) return json({ detail: "Interview context has an unsupported format." }, 400);
+    const preferences = (body.preferences || {}) as Record<string, unknown>;
+    const started = Date.now();
+    const cancellation = new AbortController(); const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (event: unknown) => { if (!cancellation.signal.aborted) controller.enqueue(encoder.encode(JSON.stringify(event) + "\n")); };
+        try {
+          const reply = await analyzeScreenWithGemini(image, preferences, context, preview => send({ type: "preview", question: preview.question, answer: preview.answer }), AbortSignal.any([request.signal, cancellation.signal]));
+          if (!reply) send({ type: "error", detail: "Screen analysis is unavailable right now. Try again in a moment." });
+          else send({ type: "complete", requests_answer: Boolean(reply.answer), speaker_role: "unknown", question: reply.question, answer: reply.answer, evidence: [], keywords: [], latency_ms: Date.now() - started });
+        } catch { send({ type: "error", detail: "The screen analysis was interrupted. Try again." }); }
+        finally { if (!cancellation.signal.aborted) controller.close(); }
+      },
+      cancel() { cancellation.abort(); },
+    });
+    return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache, no-store, no-transform", "X-Accel-Buffering": "no" } });
   }
 
   if (path === "live/transcribe") {

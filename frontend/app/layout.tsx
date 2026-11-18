@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { ReferralCapture } from "@/components/referral/referral-capture";
 import { MetaPixel } from "@/components/meta-pixel";
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <ReferralCapture />
         <MetaPixel />
         {children}
+        <Analytics />
       </body>
     </html>
   );

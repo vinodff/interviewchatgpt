@@ -37,9 +37,12 @@ try {
 } finally {Pop-Location}
 }
 $envLocalPath = Join-Path $frontendPath '.env.local'
-$existingEnv = if (Test-Path $envLocalPath) { (Get-Content $envLocalPath) -notmatch '^(BACKEND_INTERNAL_URL|NEXT_PUBLIC_WS_URL|NEXT_PUBLIC_LIVE_TRANSPORT)=' } else { @() }
-$modeLines = if ($WithBackend) { @("BACKEND_INTERNAL_URL=http://127.0.0.1:$BackendPort", "NEXT_PUBLIC_WS_URL=ws://localhost:$BackendPort") } else { @("NEXT_PUBLIC_LIVE_TRANSPORT=browser") }
-$envLines = $modeLines + $existingEnv
+# Keep these as arrays. A one-item array returned from `if` becomes a plain string, and then `+` glued every
+# setting into ONE space-separated line (that broke .env.local in the default mode). `@(...)` prevents both
+# that and `-notmatch` returning True/False instead of lines when the file has a single line.
+$existingEnv = @(if (Test-Path $envLocalPath) { @(Get-Content $envLocalPath) -notmatch '^(BACKEND_INTERNAL_URL|NEXT_PUBLIC_WS_URL|NEXT_PUBLIC_LIVE_TRANSPORT)=' })
+$modeLines = @(if ($WithBackend) { "BACKEND_INTERNAL_URL=http://127.0.0.1:$BackendPort"; "NEXT_PUBLIC_WS_URL=ws://localhost:$BackendPort" } else { "NEXT_PUBLIC_LIVE_TRANSPORT=browser" })
+$envLines = @($modeLines) + @($existingEnv)
 Set-Content -LiteralPath $envLocalPath -Value ($envLines -join "`n")
 Push-Location $frontendPath
 try {
@@ -56,6 +59,16 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
     }
     $ErrorActionPreference = $origPref
+    # output: "standalone" leaves out the CSS/JS bundles (.next/static) and public/; without them every page
+    # loads unstyled and without JavaScript. Next.js documents copying them next to server.js after each build.
+    $standaloneRoot = Join-Path $frontendPath '.next\standalone'
+    if (Test-Path $standaloneRoot) {
+        $staticTarget = Join-Path $standaloneRoot '.next\static'
+        $publicTarget = Join-Path $standaloneRoot 'public'
+        foreach ($target in @($staticTarget, $publicTarget)) { if (Test-Path $target) { Remove-Item -LiteralPath $target -Recurse -Force } }
+        Copy-Item -LiteralPath (Join-Path $frontendPath '.next\static') -Destination $staticTarget -Recurse
+        if (Test-Path (Join-Path $frontendPath 'public')) { Copy-Item -LiteralPath (Join-Path $frontendPath 'public') -Destination $publicTarget -Recurse }
+    }
 } finally {Pop-Location}
 $backend = $null; $worker = $null
 if ($WithBackend) {
@@ -64,6 +77,17 @@ $backend = Start-Process -FilePath $pythonPath -ArgumentList '-m','scripts.run_l
 $worker = Start-Process -FilePath $pythonPath -ArgumentList '-m','app.services.worker' -WorkingDirectory $backendPath -WindowStyle Hidden -RedirectStandardOutput (Join-Path $dataPath 'worker-out.log') -RedirectStandardError (Join-Path $dataPath 'worker-error.log') -PassThru
 }
 $nodePath = (Get-Command node.exe).Source
+# The standalone server.js reads env files only from .next\standalone, which has none, so server-only secrets
+# (GEMINI_API_KEY, Cashfree...) were missing and live answers failed. Pass .env.local as process environment
+# instead of copying the secrets file into build output (which a Docker image could ship).
+if (Test-Path $envLocalPath) {
+    foreach ($line in @(Get-Content $envLocalPath)) {
+        if ($line -notmatch '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$') { continue }
+        $name = $Matches[1]; $value = $Matches[2].Trim()
+        if ($value.Length -ge 2 -and (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'")))) { $value = $value.Substring(1, $value.Length - 2) }
+        if (-not [Environment]::GetEnvironmentVariable($name, 'Process')) { [Environment]::SetEnvironmentVariable($name, $value, 'Process') }
+    }
+}
 $standaloneServer = Join-Path $frontendPath '.next\standalone\server.js'
 if (Test-Path $standaloneServer) {
     $env:PORT = "$FrontendPort"

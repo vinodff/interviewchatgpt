@@ -12,8 +12,25 @@ import { StreamingRecognition } from "./streaming-recognition";
 import { audioTaskKey, type AudioAnswerContext, type PreparedAudioReply } from "./audio-answer";
 import { questionMentionsTopic } from "./question-options";
 import { AnsweredQuestions, hasExplicitRequest } from "./repeat-gate";
+import type { CaptureFactory } from "./desktop-audio";
 
-export type LocalEvent = { type: "local"; phase?: "capturing" | "connecting" | "reconnecting" | "ended"; detail?: string; error?: string; dropped?: number; level?: MicrophoneLevel };
+export type LocalEvent = { type: "local"; phase?: "capturing" | "connecting" | "reconnecting" | "ended"; detail?: string; error?: string; dropped?: number; level?: MicrophoneLevel;
+  /** Auto-answer is off and this question was heard: it waits for an explicit Answer. */
+  pendingQuestion?: string };
+export type LiveStartOptions = {
+  enhancedMicrophone?: boolean; streamingMicrophone?: boolean;
+  /** Answer detected questions automatically (default), or only when asked. */
+  autoAnswer?: boolean;
+  /** Keep listening while the page is hidden. The desktop window may be minimized mid-interview. */
+  keepListeningInBackground?: boolean;
+  /** Always run the in-page speech pipeline, even where a live socket backend exists. */
+  browserTransport?: boolean;
+  /** Supply the audio source (the desktop mixes system audio with the microphone). Needs streamingMicrophone. */
+  createCapture?: CaptureFactory;
+  /** Only use these uploaded sources as evidence. [] uses none; undefined uses all. */
+  knowledgeSources?: string[];
+};
+export type ScreenImage = { image: string; mime: "image/jpeg" | "image/png" };
 type Question = Extract<LiveMessage, { type: "question" }>;
 type AnswerTerminal = Extract<LiveMessage, { type: "answer_complete" | "answer_cancelled" }>;
 type HeldAnswer = { question: Question; replayQuestion: boolean; delta: string; terminal: AnswerTerminal | null };
@@ -83,6 +100,12 @@ export class LiveController {
   // non-English speech is heard, and report mic levels in backend mode.
   private nonEnglishWarned = false;
   private audioLevelCount = 0;
+  private autoAnswer = true;
+  private keepListeningInBackground = false;
+  private createCapture: CaptureFactory | undefined;
+  private knowledgeSources: string[] | null = null;
+  // With auto-answer off: the latest question heard, answered when the user asks.
+  private lastHeardQuestion = "";
 
   constructor(private notify: (event: LiveMessage | LocalEvent) => void, private onSession: (session: Session) => void, private onUsage?: (user: User) => void) {}
 
@@ -119,7 +142,103 @@ export class LiveController {
     } catch { return null; }
   }
 
-  askQuestion(questionText: string): void {
+  /** Turn automatic answers on or off mid-session. */
+  setAutoAnswer(on: boolean): void {
+    this.autoAnswer = on;
+    if (on) this.lastHeardQuestion = "";
+  }
+
+  /** Answer the question heard most recently (auto-answer off), else the given transcript text. */
+  answerLatest(fallbackText = ""): boolean {
+    const text = (this.lastHeardQuestion || fallbackText).trim();
+    if (!text) return false;
+    this.lastHeardQuestion = "";
+    this.askQuestion(text, false);
+    return true;
+  }
+
+  /**
+   * Answer the task visible in a screenshot (a coding problem, a question on a slide).
+   * It joins the same answer pipeline as speech: a newer question supersedes it.
+   */
+  async analyzeImage(screen: ScreenImage): Promise<void> {
+    if (this.stopped || !this.started || !this.session) return;
+    this.manualSpeechCutoff = Date.now();
+    this.resetPendingBrowserSpeech?.();
+    this.cancelPendingBrowserAnswer();
+    for (const pending of this.answerRequests.values()) pending.abort();
+    this.answerRequests.clear(); this.queuedSpeech = [];
+    const request = new AbortController();
+    const sequence = ++this.generationSequence;
+    this.latestAnsweredSequence = sequence;
+    this.answerRequests.set(sequence, request);
+    const genId = `gen_${sequence}`;
+    const startedAt = Date.now();
+    const timeout = setTimeout(() => request.abort(), 40000);
+    const superseded = () => this.stopped || sequence < this.latestAnsweredSequence;
+    let claimed = false;
+    let previewText = "";
+    let completed: { question?: unknown; answer?: unknown } | null = null;
+    const claim = (question: string) => {
+      if (claimed) return;
+      claimed = true;
+      this.deliver({ type: "question", generation_id: genId, question: question.trim() || "Task on your screen", keywords: [] });
+    };
+    this.notify({ type: "local", detail: "Reading your screen…", error: "" });
+    try {
+      await streamApi("/live/analyze", {
+        ...post({ image: screen.image, mime: screen.mime, preferences: this.currentPreferences || undefined, interview_context: this.interviewMemory.context() }), signal: request.signal,
+      }, event => {
+        if (superseded() || request.signal.aborted) return;
+        if (event.type === "error") throw new Error(typeof event.detail === "string" ? event.detail : "Screen analysis failed. Try again.");
+        if (event.type === "complete") { completed = event; return; }
+        if (event.type === "preview" && typeof event.question === "string" && typeof event.answer === "string") {
+          claim(event.question);
+          if (event.answer.startsWith(previewText)) {
+            const delta = event.answer.slice(previewText.length);
+            if (delta) this.deliver({ type: "answer_delta", generation_id: genId, text: delta });
+            previewText = event.answer;
+          }
+        }
+      });
+      if (superseded()) return;
+      const result = completed as { question?: unknown; answer?: unknown } | null;
+      if (!result) throw new Error("Screen analysis ended early. Try again.");
+      const question = typeof result.question === "string" ? result.question.trim() : "";
+      const answer = typeof result.answer === "string" ? result.answer.trim() : "";
+      if (!answer) {
+        if (claimed) this.deliver({ type: "answer_cancelled", generation_id: genId });
+        this.notify({ type: "local", error: "No question or task was found on your screen." });
+        return;
+      }
+      claim(question);
+      this.currentAnswerText = answer;
+      this.deliver({ type: "answer_complete", generation_id: genId, answer, evidence: [], keywords: [], latency_ms: Date.now() - startedAt });
+      const asked = question || "Task on your screen";
+      this.interviewMemory.recordAnswer(genId, asked, answer, asked);
+      this.saveTurn(genId, asked, asked, answer, [], startedAt);
+      this.notify({ type: "local", detail: "", error: "" });
+    } catch (error) {
+      if (superseded()) return;
+      if (claimed) this.deliver({ type: "answer_cancelled", generation_id: genId });
+      this.notify({ type: "local", error: request.signal.aborted ? "Screen analysis timed out. Try again." : messageOf(error) });
+    } finally {
+      clearTimeout(timeout);
+      this.answerRequests.delete(sequence);
+    }
+  }
+
+  /** Keep a finished answer in this session's history (device copy and, when signed in, the server). */
+  private saveTurn(id: string, text: string, question: string, answer: string, evidence: Evidence[], startedAt: number): void {
+    if (!this.session) return;
+    const createdAt = new Date().toISOString();
+    try { addTurnToStoredSession(this.session.id, { id, role: "interviewer", text, question, answer, evidence, created_at: createdAt }); } catch { /* The device copy is optional. */ }
+    if (this.session.id && !this.session.id.startsWith("local_")) {
+      void api(`/sessions/${encodeURIComponent(this.session.id)}/turn`, post({ id, role: "interviewer", text, question, answer, evidence, created_at: createdAt, latency_ms: Date.now() - startedAt })).catch(() => {});
+    }
+  }
+
+  askQuestion(questionText: string, echoTranscript = true): void {
     const trimmed = questionText.trim();
     if (!trimmed || this.stopped || !this.started || !this.browserMode) return;
     this.manualSpeechCutoff = Date.now();
@@ -128,7 +247,7 @@ export class LiveController {
     this.latestAnsweredSequence = this.generationSequence + 1;
     for (const request of this.answerRequests.values()) request.abort();
     this.answerRequests.clear(); this.queuedSpeech = [];
-    this.notify({ type: "transcript", id: `tr_manual_${Date.now()}`, role: "interviewer", text: trimmed, final: true });
+    if (echoTranscript) this.notify({ type: "transcript", id: `tr_manual_${Date.now()}`, role: "interviewer", text: trimmed, final: true });
     const cached = this.answeredQuestions.cached(trimmed);
     if (cached) {
       const genId = `gen_${++this.generationSequence}`;
@@ -221,13 +340,17 @@ export class LiveController {
     if (held.terminal) this.notify(held.terminal);
   }
 
-  async start(mode: AudioMode, title: string, retention: boolean, options: { enhancedMicrophone?: boolean; streamingMicrophone?: boolean } = {}): Promise<void> {
+  async start(mode: AudioMode, title: string, retention: boolean, options: LiveStartOptions = {}): Promise<void> {
     if (this.started || this.stopped) return;
     this.started = true;
     this.nonEnglishWarned = false;
     this.audioLevelCount = 0;
     this.enhancedMicrophone = options.enhancedMicrophone === true;
     this.streamingMicrophone = options.streamingMicrophone === true;
+    this.autoAnswer = options.autoAnswer !== false;
+    this.keepListeningInBackground = options.keepListeningInBackground === true;
+    this.createCapture = options.createCapture;
+    this.knowledgeSources = Array.isArray(options.knowledgeSources) ? [...options.knowledgeSources] : null;
     try {
       if (isBrowserWorkspace()) {
         if (mode !== "microphone") throw new Error("This workspace supports microphone speech only. Shared-tab transcription requires the full backend.");
@@ -237,7 +360,7 @@ export class LiveController {
         this.startBrowserLiveMode();
         return;
       }
-      if (mode === "microphone" && hostedWithoutLiveBackend()) {
+      if (mode === "microphone" && (hostedWithoutLiveBackend() || options.browserTransport === true)) {
         // Start listening at once, still inside the tap: one microphone, no session or ticket round trips
         // first. The server record (minutes, history) is created alongside and swapped in when ready.
         this.browserMode = true;
@@ -497,7 +620,7 @@ export class LiveController {
     this.latestQuestion = null; this.heldAnswer = null;
     for (const request of this.answerRequests.values()) request.abort();
     this.answerRequests.clear(); this.queuedSpeech = []; this.interviewMemory.reset(); this.answeredQuestions.reset();
-    this.audioReplies.clear(); this.pendingAudioSpeech = "";
+    this.audioReplies.clear(); this.pendingAudioSpeech = ""; this.lastHeardQuestion = "";
     if (this.recognitionRestart) clearTimeout(this.recognitionRestart);
     this.recognitionRestart = null;
     this.removeVisibilityListener?.(); this.removeVisibilityListener = null;
@@ -632,8 +755,9 @@ export class LiveController {
       const onMicrophoneLevel = (level: MicrophoneLevel) => { if (!this.stopped) this.notify({ type: "local", level }); };
       const getAudioContext = () => this.audioAnswerContext();
       const onSpeechStatus = (detail: string) => { if (!this.stopped) this.notify({ type: "status", state: "listening", detail }); };
+      const createCapture = this.createCapture;
       const Speech = streaming ? class extends StreamingRecognition {
-        constructor() { super(onMicrophoneLevel, onSpeechStatus); }
+        constructor() { super(onMicrophoneLevel, onSpeechStatus, createCapture); }
       } : enhanced ? class extends EnhancedRecognition {
         constructor() { super(onMicrophoneLevel, getAudioContext); }
       } : windowObj ? (windowObj.SpeechRecognition || windowObj.webkitSpeechRecognition) : null;
@@ -936,7 +1060,7 @@ export class LiveController {
           this.notify({ type: "local", phase: "capturing", detail: "Waiting for microphone permission…" });
           void recognition.ready.then(() => { if (!this.stopped) this.notify({ type: "status", state: "listening", detail: `${microphoneStatus} Keep this page visible.` }); }).catch(() => undefined);
         } else this.notify({ type: "status", state: "listening", detail: "Listening through browser speech recognition. Keep this page visible." });
-        if (typeof document !== "undefined") {
+        if (typeof document !== "undefined" && !this.keepListeningInBackground) {
           const visibility = () => { if (document.hidden) void this.fail("Your browser moved this page to the background. Capture stopped; return here and start again."); };
           document.addEventListener("visibilitychange", visibility);
           this.removeVisibilityListener = () => document.removeEventListener("visibilitychange", visibility);
@@ -951,6 +1075,12 @@ export class LiveController {
 
   private async handleBrowserQuestion(questionText: string, transcriptId?: string, transcriptFinal = true, manual = false): Promise<void> {
     if (this.stopped || !this.session) return;
+    if (!manual && !this.autoAnswer) {
+      // Hold it for the Answer button; nothing is generated (or billed to the AI) until then.
+      this.lastHeardQuestion = questionText;
+      this.notify({ type: "local", pendingQuestion: questionText });
+      return;
+    }
     if (!manual && this.answeredQuestions.isRepeat(questionText)) {
       this.notify({ type: "local", detail: "Same question as before, so the current answer stays on screen.", error: "" });
       return;
@@ -984,11 +1114,14 @@ export class LiveController {
     let evidence: Evidence[] = [];
     let user: User | null = null;
     try {
-      evidence = searchStoredEvidence(focusText);
+      const allowed = this.knowledgeSources;
+      const useKnowledge = allowed === null || allowed.length > 0;
+      evidence = useKnowledge ? searchStoredEvidence(focusText).filter(item => allowed === null || allowed.includes(item.source_id)) : [];
       user = getStoredUser();
-      if (!evidence.length && !this.remoteSearchUnavailable) {
+      if (useKnowledge && !evidence.length && !this.remoteSearchUnavailable) {
+        const onlySources = allowed ? `&sources=${encodeURIComponent(allowed.join(","))}` : "";
         const remote = await Promise.race([
-          api<Evidence[]>(`/knowledge/search?q=${encodeURIComponent(focusText)}`).catch(error => {
+          api<Evidence[]>(`/knowledge/search?q=${encodeURIComponent(focusText)}${onlySources}`).catch(error => {
             if (error instanceof ApiError && [404, 405, 501].includes(error.status)) this.remoteSearchUnavailable = true;
             return [];
           }),

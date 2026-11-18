@@ -1,0 +1,56 @@
+{
+  "name": "interviewwin-desktop",
+  "productName": "InterviewWin",
+  "version": "1.2.0",
+  "description": "InterviewWin desktop — a floating live interview assistant with system audio, Glance and screen Analyze.",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "cross-env IW_APP_URL=http://127.0.0.1:3001 electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "cross-env": "7.0.3",
+    "electron": "45.3.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "live.interviewwin.desktop",
+    "productName": "InterviewWin",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "config.local.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.png"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.png",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "InterviewWin listens to the conversation to suggest answers while your session is live."
+      }
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0"
+  }
+}

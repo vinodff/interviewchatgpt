@@ -3,6 +3,7 @@ import { AudioCapture } from "./capture";
 import { packetSamples, signalLevel } from "./quiet-audio";
 import { streamingSpeechSetup, type StreamingSpeechTicket } from "./streaming-speech-config";
 import type { MicrophoneLevel } from "./enhanced-recognition";
+import type { CaptureFactory, PacketCapture } from "./desktop-audio";
 
 type SpeechResult = { 0: { transcript: string }; isFinal: boolean; length: number };
 type SpeechEvent = { resultIndex: number; results: SpeechResult[]; audio_start_ms: number; audio_end_ms: number };
@@ -15,7 +16,7 @@ export class StreamingRecognition {
   onerror: ((event: { error?: string; detail?: string }) => void) | null = null;
   onend: (() => void) | null = null;
   ready: Promise<void> = Promise.resolve();
-  private capture: AudioCapture | null = null;
+  private capture: PacketCapture | null = null;
   private socket: WebSocket | null = null;
   private request: AbortController | null = null;
   private queue: Frame[] = [];
@@ -44,7 +45,8 @@ export class StreamingRecognition {
   private resolveReady: (() => void) | null = null;
   private rejectReady: ((reason: Error) => void) | null = null;
 
-  constructor(private onLevel: (level: MicrophoneLevel) => void, private onStatus: (detail: string) => void) {}
+  /** createCapture lets the desktop app supply mixed system + microphone audio; the default is the microphone. */
+  constructor(private onLevel: (level: MicrophoneLevel) => void, private onStatus: (detail: string) => void, private createCapture?: CaptureFactory) {}
 
   start(): void {
     if (this.stopped || this.capture) return;
@@ -52,8 +54,11 @@ export class StreamingRecognition {
     void this.ready.catch(() => undefined);
     try {
       // Construct synchronously in Start's gesture so Android/iOS can grant capture.
-      this.capture = new AudioCapture("microphone", packet => this.packet(packet), () => this.fail("Microphone capture was interrupted. Restart the session."), { enhanced: true });
-      void this.capture.ready.catch(() => this.fail("Microphone access failed. Allow microphone access and restart."));
+      const onPacket = (packet: ArrayBuffer) => this.packet(packet);
+      const onEnded = (message?: string) => this.fail(message || "Microphone capture was interrupted. Restart the session.");
+      this.capture = this.createCapture ? this.createCapture(onPacket, onEnded) : new AudioCapture("microphone", onPacket, () => onEnded(), { enhanced: true });
+      // A supplied capture explains its own failure (for example, which source was denied).
+      void this.capture.ready.catch(error => this.fail(this.createCapture && error instanceof Error && error.message ? error.message : "Microphone access failed. Allow microphone access and restart."));
       // Fetch the speech token and open the socket while the microphone starts; audio queues until setup completes.
       void this.connect();
     } catch { this.fail("Microphone capture could not start. Check browser permissions."); }

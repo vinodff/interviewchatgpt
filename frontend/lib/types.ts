@@ -7,7 +7,9 @@ export type User = {
   monthly_minute_limit?: number;
   credit_minutes_remaining?: number;
 };
-export type Preferences = { include_simple_example?: boolean; role?: string; company?: string; language?: string; answer_style?: string; job_description?: string; answer_tone?: "professional" | "friendly" | "casual"; grounding?: "balanced" | "strict"; english_level?: "simple" | "everyday" | "advanced"; reading_mode?: "auto" | "speech" | "paced" | "off"; reading_wpm?: number; response_delivery?: "natural" | "talking_points" | "structured"; personalization?: "grounded" | "technical"; answer_text_size?: number; answer_font?: "system" | "serif" | "readable"; answer_theme?: "default" | "easy" | "contrast" };
+export type Preferences = { include_simple_example?: boolean; role?: string; company?: string; language?: string; answer_style?: string; job_description?: string; answer_tone?: "professional" | "friendly" | "casual"; grounding?: "balanced" | "strict"; english_level?: "simple" | "everyday" | "advanced"; reading_mode?: "auto" | "speech" | "paced" | "off"; reading_wpm?: number; response_delivery?: "natural" | "talking_points" | "structured"; personalization?: "grounded" | "technical"; answer_text_size?: number; answer_font?: "system" | "serif" | "readable"; answer_theme?: "default" | "easy" | "contrast";
+  /** Desktop session settings. They shape the answer prompt and model choice only. */
+  humanize?: boolean; custom_instructions?: string; session_type?: "interview" | "meeting"; answer_model?: "fast" | "smart" };
 export type Project = { id: string; name: string; description: string; analysis: Record<string, unknown>; source_count: number; created_at: string };
 export type Source = { id: string; project_id: string | null; name: string; kind: string; status: "queued" | "processing" | "ready" | "failed"; error: string | null; chunk_count: number; created_at: string };
 export type Evidence = { id: string; source_id: string; project_id: string | null; source_name: string; text: string; score: number; locator: string; verified_contribution: boolean; retrieval_mode?: string; retrieval_warning?: string };
