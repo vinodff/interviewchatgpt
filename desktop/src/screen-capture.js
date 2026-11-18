@@ -22,6 +22,8 @@ async function captureScreen(win) {
   const thumbnailSize = { width: Math.round(physicalWidth * ratio), height: Math.round(physicalHeight * ratio) };
   const hide = win && !win.isDestroyed() && win.isVisible();
   const opacity = hide ? win.getOpacity() : 1;
+  // Hide our window for a beat so Analyze reads the coding problem / error behind it, not the answer card.
+  // Content protection already keeps InterviewWin out of screen shares; opacity covers capture from this process.
   if (hide) { win.setOpacity(0); await delay(HIDE_MS); }
   try {
     const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize });
@@ -34,7 +36,11 @@ async function captureScreen(win) {
     const smaller = source.thumbnail.resize({ width: Math.round(thumbnailSize.width / 2) }).toJPEG(60).toString("base64");
     return smaller.length <= MAX_BASE64 ? { image: smaller, mime: "image/jpeg" } : null;
   } finally {
-    if (hide && !win.isDestroyed()) win.setOpacity(opacity);
+    if (hide && !win.isDestroyed()) {
+      win.setOpacity(opacity);
+      // Re-assert after the opacity dance so a focus change cannot leave the window capturable.
+      if (process.env.IW_ALLOW_CAPTURE !== "1") win.setContentProtection(true);
+    }
   }
 }
 

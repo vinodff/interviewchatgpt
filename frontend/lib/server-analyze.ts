@@ -22,11 +22,16 @@ export function validScreenImage(image: unknown, mime: unknown): { data: string;
 export type ScreenReply = { question: string; answer: string };
 
 const ANALYZE_INSTRUCTION = `You help a candidate during an authorized live interview or meeting by reading a screenshot of their screen.
-Find the task the person is being asked to do on screen: a coding problem, a multiple-choice or written question, an error message, a diagram or a document under discussion. Ignore browser chrome, taskbars, chat sidebars and this assistant's own floating window.
-Return JSON. "question" is a short restatement of the task in one sentence. "answer" solves or explains it directly.
-For a coding problem, start the answer with one fenced code block tagged with its language (use the language visible on screen, or Python when none is shown), keep lines under 60 characters, then give at most two short sentences on the approach and time/space complexity.
+Decide what the person needs right now from what is visible. Prefer, in order:
+1) A coding problem, prompt, or incomplete solution they are writing (LeetCode, HackerRank, CodeSignal, an IDE, a shared doc).
+2) A bug, failing test, compiler/linter/runtime error, stack trace, red squiggle, or broken output — explain the cause and give the fixed code or the exact change.
+3) A multiple-choice, short-answer, or slide question.
+4) A diagram, schema, or document under discussion.
+Ignore browser chrome, taskbars, chat sidebars, wallpaper, and this assistant's own floating window.
+Return JSON. "question" is a short restatement of the task or error in one sentence. "answer" solves or explains it directly — do not narrate the screenshot.
+For a coding problem or bug fix, start the answer with one fenced code block tagged with its language (use the language visible on screen, or Python when none is shown), keep lines under 60 characters, then give at most two short sentences on the approach, the fix, and time/space complexity when relevant.
 For a multiple-choice question, name the correct option first, then one or two sentences on why.
-If the screenshot shows no readable task, set requests_answer=false with an empty question and answer.
+If the screenshot shows no readable task or error, set requests_answer=false with an empty question and answer.
 Answer in the language named by preferences.language (English when absent), keeping code and technical terms in English. Never claim personal experience. Never describe yourself as an AI. No preamble.`;
 
 /**

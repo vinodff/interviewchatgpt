@@ -121,6 +121,34 @@ describe("desktop capture and background listening", () => {
   });
 });
 
+describe("desktop one-tap follow-ups", () => {
+  it("generates a new answer for Shorter instead of replaying the cached original", async () => {
+    doubles.api.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path !== "/live/answer") return undefined;
+      const body = JSON.parse(String(options?.body || "{}"));
+      if (String(body.question || "").includes("Follow-up rewrite")) {
+        return { requests_answer: true, speaker_role: "interviewer", question: "Shorter polymorphism", answer: "One interface, many forms.", evidence: [], keywords: [] };
+      }
+      return { requests_answer: true, speaker_role: "interviewer", question: "What is polymorphism in OOP?", answer: "Polymorphism lets one interface take many forms across classes.", evidence: [], keywords: [] };
+    });
+    const { live, notify } = await startDesktop();
+    live.askQuestion("What is polymorphism in OOP?"); await vi.advanceTimersByTimeAsync(500);
+    expect(answers(notify)).toHaveLength(1);
+    live.askQuestion('Follow-up rewrite — shorter: take your previous answer about [What is polymorphism in OOP?] and rewrite it in two or three sentences I can say out loud. Do not repeat the long version.', false);
+    await vi.advanceTimersByTimeAsync(500);
+    // Without forceGenerate this would replay the long cached answer and never call /live/answer again.
+    live.askQuestion('Follow-up rewrite — shorter: take your previous answer about [What is polymorphism in OOP?] and rewrite it in two or three sentences I can say out loud. Do not repeat the long version.', false, true);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(askedQuestions().filter(question => question.includes("Follow-up rewrite"))).toHaveLength(1);
+    expect(answers(notify).map(item => item.answer)).toEqual([
+      "Polymorphism lets one interface take many forms across classes.",
+      "Polymorphism lets one interface take many forms across classes.",
+      "One interface, many forms.",
+    ]);
+    await live.stop();
+  });
+});
+
 describe("desktop screen analysis", () => {
   it("delivers the on-screen task as a question with its answer and saves the turn", async () => {
     const { live, notify } = await startDesktop();

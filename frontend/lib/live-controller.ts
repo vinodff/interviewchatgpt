@@ -238,7 +238,12 @@ export class LiveController {
     }
   }
 
-  askQuestion(questionText: string, echoTranscript = true): void {
+  /**
+   * Ask a question from Chat, Answer, or a one-tap follow-up.
+   * `forceGenerate` skips the "already answered" cache — required for Shorter / More detail / Example,
+   * because those prompts still name the original question and would otherwise replay the same answer.
+   */
+  askQuestion(questionText: string, echoTranscript = true, forceGenerate = false): void {
     const trimmed = questionText.trim();
     if (!trimmed || this.stopped || !this.started || !this.browserMode) return;
     this.manualSpeechCutoff = Date.now();
@@ -248,16 +253,18 @@ export class LiveController {
     for (const request of this.answerRequests.values()) request.abort();
     this.answerRequests.clear(); this.queuedSpeech = [];
     if (echoTranscript) this.notify({ type: "transcript", id: `tr_manual_${Date.now()}`, role: "interviewer", text: trimmed, final: true });
-    const cached = this.answeredQuestions.cached(trimmed);
-    if (cached) {
-      const genId = `gen_${++this.generationSequence}`;
-      this.latestAnsweredSequence = this.generationSequence;
-      this.currentAnswerText = cached.answer;
-      this.deliver({ type: "question", generation_id: genId, question: cached.question, keywords: [] });
-      this.deliver({ type: "answer_complete", generation_id: genId, answer: cached.answer, evidence: [], keywords: [], latency_ms: 0 });
-      return;
+    if (!forceGenerate) {
+      const cached = this.answeredQuestions.cached(trimmed);
+      if (cached) {
+        const genId = `gen_${++this.generationSequence}`;
+        this.latestAnsweredSequence = this.generationSequence;
+        this.currentAnswerText = cached.answer;
+        this.deliver({ type: "question", generation_id: genId, question: cached.question, keywords: [] });
+        this.deliver({ type: "answer_complete", generation_id: genId, answer: cached.answer, evidence: [], keywords: [], latency_ms: 0 });
+        return;
+      }
     }
-    void this.handleBrowserQuestion(trimmed, undefined, true, true);
+    void this.handleBrowserQuestion(trimmed, undefined, true, true, forceGenerate);
   }
 
   /**
@@ -1073,7 +1080,7 @@ export class LiveController {
     }
   }
 
-  private async handleBrowserQuestion(questionText: string, transcriptId?: string, transcriptFinal = true, manual = false): Promise<void> {
+  private async handleBrowserQuestion(questionText: string, transcriptId?: string, transcriptFinal = true, manual = false, forceGenerate = false): Promise<void> {
     if (this.stopped || !this.session) return;
     if (!manual && !this.autoAnswer) {
       // Hold it for the Answer button; nothing is generated (or billed to the AI) until then.
@@ -1081,7 +1088,7 @@ export class LiveController {
       this.notify({ type: "local", pendingQuestion: questionText });
       return;
     }
-    if (!manual && this.answeredQuestions.isRepeat(questionText)) {
+    if (!manual && !forceGenerate && this.answeredQuestions.isRepeat(questionText)) {
       this.notify({ type: "local", detail: "Same question as before, so the current answer stays on screen.", error: "" });
       return;
     }
@@ -1093,7 +1100,8 @@ export class LiveController {
     const request = new AbortController();
     const requestSequence = ++this.generationSequence;
     this.answerRequests.set(requestSequence, request);
-    this.answeredQuestions.start(requestSequence, questionText);
+    // Follow-ups must not claim the original question's topic key, or the next real repeat would get the refined answer.
+    if (!forceGenerate) this.answeredQuestions.start(requestSequence, questionText);
     const genId = `gen_${requestSequence}`;
     const cachedAudio = transcriptId ? this.audioReplies.get(transcriptId) : undefined;
     if (transcriptId) this.audioReplies.delete(transcriptId);
@@ -1201,7 +1209,7 @@ export class LiveController {
         evidence: usedEvidence,
         keywords: Array.isArray(result.keywords) ? result.keywords : words.slice(0, 5), latency_ms: Date.now() - startedAt });
       this.interviewMemory.recordAnswer(genId, resolvedQuestion, answer, questionText);
-      this.answeredQuestions.finish(requestSequence, resolvedQuestion, answer);
+      if (!forceGenerate) this.answeredQuestions.finish(requestSequence, resolvedQuestion, answer);
       this.notify({ type: "metrics", questions: this.interviewMemory.context().answered_count, reconnects: 0, audio_dropped: 0, first_token_ms: firstTokenMs ?? Date.now() - startedAt, total_ms: Date.now() - startedAt });
       addTurnToStoredSession(this.session.id, { id: genId, role: "interviewer", text: questionText, question: resolvedQuestion,
         answer, evidence: usedEvidence, created_at: new Date().toISOString() });

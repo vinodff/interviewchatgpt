@@ -15,9 +15,9 @@ const benefits = [
 
 const installSteps: Record<DesktopPlatform, string[]> = {
   windows: [
-    `Open ${DESKTOP_APPS.windows.file} from your downloads.`,
-    "If Windows shows “Windows protected your PC”, choose More info, then Run anyway.",
-    "Finish the installer, open InterviewWin from the Start menu, and sign in.",
+    `Open ${DESKTOP_APPS.windows.file} from your Downloads folder (your browser may show a generic icon for the file).`,
+    "When Windows shows the purple “Windows protected your PC” screen, click More info, then Run anyway.",
+    "Finish the installer. InterviewWin appears in the Start menu with the green wave icon — open it and sign in.",
   ],
   mac: [
     `Open ${DESKTOP_APPS.mac.file} and drag InterviewWin into Applications.`,

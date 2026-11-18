@@ -1,8 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useSyncExternalStore } from "react";
-import { Download, MonitorDown } from "lucide-react";
+import { Download, MonitorDown, ShieldAlert } from "lucide-react";
 import { DESKTOP_APPS, desktopPlatformFrom, type DesktopPlatform } from "@/lib/desktop-download";
 import { PlatformIcon } from "./platform-icons";
 
@@ -37,11 +38,33 @@ export function DesktopDownloadOptions({ platform: fromRequest }: { platform: De
     const app = DESKTOP_APPS[platform];
     const here = platform === current;
     return <article key={platform} className={here ? "download-card download-card-current" : "download-card"}>
-      <div className="download-card-top"><span className="download-card-icon"><PlatformIcon platform={platform} size={28} /></span>{here && <span className="download-card-badge">For this computer</span>}</div>
+      <div className="download-card-top">
+        <span className="download-card-icon" aria-hidden="true">
+          <Image src="/desktop-app-icon.png" alt="" width={40} height={40} className="download-app-icon" />
+        </span>
+        {here && <span className="download-card-badge">For this computer</span>}
+      </div>
       <h2>{app.name}</h2>
       <p>{app.requires}</p>
       <a href={`/download/${platform}`} className={here ? "button button-primary" : "button button-secondary"}><Download size={17} aria-hidden="true" /> Download for {app.name}</a>
       <small>Free · {app.file}</small>
+      {platform === "windows" && (
+        <p className="download-smartscreen">
+          <ShieldAlert size={16} aria-hidden="true" />
+          <span>
+            Windows may show <strong>Windows protected your PC</strong> and a generic file icon in the browser. That is normal for a new installer.
+            Open the file, choose <strong>More info</strong>, then <strong>Run anyway</strong>. The green wave icon appears after install in the Start menu.
+          </span>
+        </p>
+      )}
+      {platform === "mac" && (
+        <p className="download-smartscreen">
+          <ShieldAlert size={16} aria-hidden="true" />
+          <span>
+            If macOS says it can’t check for malware, open <strong>System Settings → Privacy &amp; Security</strong> and choose <strong>Open Anyway</strong>.
+          </span>
+        </p>
+      )}
     </article>;
   })}</div>;
 }

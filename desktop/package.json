@@ -33,7 +33,7 @@
       "target": [
         "nsis"
       ],
-      "icon": "assets/icon.png"
+      "icon": "build/icon.ico"
     },
     "mac": {
       "target": [
@@ -56,6 +56,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/installerIcon.ico",
+      "uninstallerIcon": "build/uninstallerIcon.ico",
       "artifactName": "InterviewWin-Windows-Setup.${ext}"
     },
     "dmg": {

@@ -116,7 +116,7 @@ export function useDesktopLive(callbacks: Callbacks): DesktopLive {
     answerLatest: fallbackText => controller.current?.answerLatest(fallbackText) ?? false,
     ask: text => controller.current?.askQuestion(text),
     answerHeard: text => controller.current?.askQuestion(text, false),
-    refine: (kind, question) => controller.current?.askQuestion(refinePrompt(kind, question), false),
+    refine: (kind, question) => controller.current?.askQuestion(refinePrompt(kind, question), false, true),
     analyze: async screen => { await controller.current?.analyzeImage(screen); },
     setHeld: held => controller.current?.setAnswerLocked(held),
     setAutoAnswer: on => { controller.current?.setAutoAnswer(on); if (on) setPendingQuestion(""); },

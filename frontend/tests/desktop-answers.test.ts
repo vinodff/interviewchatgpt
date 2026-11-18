@@ -53,7 +53,7 @@ describe("stepEntry", () => {
 
 describe("refinePrompt", () => {
   it("names the question so the follow-up stands on its own", () => {
-    expect(refinePrompt("shorter", "What is  Python?\n")).toContain('"What is Python?"');
+    expect(refinePrompt("shorter", "What is  Python?\n")).toContain("[What is Python?]");
     expect(refinePrompt("example", "")).toContain("the last question");
     expect(refinePrompt("detail", "q".repeat(5000)).length).toBeLessThan(800);
     expect(new Set(["shorter", "detail", "example"].map(kind => refinePrompt(kind as "shorter", "Q")))).toHaveProperty("size", 3);

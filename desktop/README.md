@@ -130,8 +130,10 @@ release, so publishing a release is all it takes to ship a new version:
    (one file for Apple silicon and Intel) and publishes them. Run it by hand from the Actions tab for
    test builds that are not published.
 
-Unsigned installers work, but Windows SmartScreen and macOS warn the first time they open; the
-download page and help center explain how to continue. To sign them, add these repository secrets:
+Unsigned installers work, but Windows SmartScreen shows “Windows protected your PC” (and browsers
+often show a generic file icon) until the installer is Authenticode-signed. The download page and
+help center explain More info → Run anyway. After install, the Start menu uses the green wave icon
+from `build/icon.ico`. To remove the SmartScreen warning for customers, add these repository secrets:
 
 - **Mac:** `MAC_CSC_LINK` (a base64 Developer ID Application `.p12`) and `MAC_CSC_KEY_PASSWORD`, plus
   `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` to notarize.

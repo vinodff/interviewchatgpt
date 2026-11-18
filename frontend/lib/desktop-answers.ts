@@ -56,13 +56,17 @@ export const REFINE_OPTIONS: ReadonlyArray<{ kind: RefineKind; label: string }> 
 ];
 const QUESTION_LIMIT = 600;
 
-/** The request sent for a follow-up. It names the question, so it stands on its own if context is thin. */
+/**
+ * The request sent for a follow-up. It names the prior topic so it stands alone if context is thin.
+ * Phrased as an explicit rewrite (not a fresh interview question) so the answer cache and the model
+ * both treat it as a new generation rather than a repeat of the original question.
+ */
 export function refinePrompt(kind: RefineKind, question: string): string {
   const asked = question.replace(/\s+/g, " ").trim().slice(0, QUESTION_LIMIT) || "the last question";
   switch (kind) {
-    case "shorter": return `Give a shorter version of the answer to "${asked}": two or three sentences I can say out loud.`;
-    case "detail": return `Explain the answer to "${asked}" in more depth: the key reasoning, trade-offs and details an interviewer would probe.`;
-    case "example": return `Give one concrete, real-world example that illustrates the answer to "${asked}".`;
+    case "shorter": return `Follow-up rewrite — shorter: take your previous answer about [${asked}] and rewrite it in two or three sentences I can say out loud. Do not repeat the long version.`;
+    case "detail": return `Follow-up rewrite — more detail: expand your previous answer about [${asked}] with the key reasoning, trade-offs, and details an interviewer would probe.`;
+    case "example": return `Follow-up rewrite — example: give one concrete, real-world example that illustrates your previous answer about [${asked}].`;
   }
 }
 

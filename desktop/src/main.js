@@ -235,6 +235,12 @@ function createWindow() {
   if (process.platform === "darwin") win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.webContents.setUserAgent(chromeUserAgent());
   win.once("ready-to-show", () => { if (win) win.show(); });
+  // Stay hidden from screen share and screenshots even while the cursor is on this window.
+  if (HIDE_FROM_CAPTURE) {
+    win.on("focus", () => { if (win && !win.isDestroyed()) win.setContentProtection(true); });
+    win.on("blur", () => { if (win && !win.isDestroyed()) win.setContentProtection(true); });
+    win.on("show", () => { if (win && !win.isDestroyed()) win.setContentProtection(true); });
+  }
   win.on("moved", rememberPosition);
   win.on("closed", () => { stopProbe(); clearStartupWatchdog(); setLive(false); win = null; });
   wireNavigation(win.webContents);
